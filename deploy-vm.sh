@@ -24,7 +24,6 @@ touch "$IP_FILE"
 # =========================
 
 LAST_OCTET=$(awk -F. '{print $4}' "$IP_FILE" | sort -n | tail -1)
-
 if [ -z "$LAST_OCTET" ]; then
   NEW_OCTET=3
 else
@@ -32,17 +31,29 @@ else
 fi
 
 if [ "$NEW_OCTET" -gt 126 ]; then
-  echo "BŁĄD: Osiągnięto limit adresów dla maski /25 (.126)!"
+  echo "BŁĄD: Osiągnięto limit adresów dla maski /25!"
   exit 1
 fi
 
 IP="$IP_PREFIX.$NEW_OCTET"
 
 # =========================
-# ASK FOR VM NAME
+# USER INPUTS
 # =========================
 
 read -p "Podaj nazwę VM: " NAME
+
+# Wybór Dysku
+echo "Wybierz rozmiar dysku (GB): 25, 40, 80 lub wpisz własny (np. 100):"
+read -p "Rozmiar [40]: " DISK_SIZE
+DISK_SIZE=${DISK_SIZE:-40}
+
+# Wybór RAM
+echo "Wybierz RAM (GB): 2, 4, 8 lub wpisz własny (np. 16):"
+read -p "RAM [2]: " RAM_SIZE
+RAM_SIZE=${RAM_SIZE:-2}
+# Przeliczenie na MB dla qm
+RAM_MB=$((RAM_SIZE * 1024))
 
 # =========================
 # FIND HIGHEST VMID + 10
@@ -52,7 +63,11 @@ VMID=$(qm list | awk 'NR>1 && $1 < 90000 {print $1}' | sort -n | tail -1)
 [ -z "$VMID" ] && VMID=1000
 VMID=$((VMID + 10))
 
-echo "Tworzę VM $NAME z ID: $VMID i IP: $IP"
+echo "--- Konfiguracja ---"
+echo "VMID: $VMID | Nazwa: $NAME"
+echo "IP:   $IP$MASK"
+echo "Disk: ${DISK_SIZE}G | RAM: ${RAM_MB}MB"
+echo "--------------------"
 
 # =========================
 # CREATE VM
@@ -60,7 +75,7 @@ echo "Tworzę VM $NAME z ID: $VMID i IP: $IP"
 
 qm create $VMID \
   --name "$NAME" \
-  --memory 2048 \
+  --memory $RAM_MB \
   --cores 2 \
   --net0 virtio,bridge=$BRIDGE,tag=$VLAN \
   --scsihw virtio-scsi-single \
@@ -76,8 +91,8 @@ qm set $VMID \
   --scsi0 $STORAGE:vm-$VMID-disk-0 \
   --boot order=scsi0
 
-# Zmiana rozmiaru na 40GB
-qm resize $VMID scsi0 40G
+# Zmiana rozmiaru na wybrany przez użytkownika
+qm resize $VMID scsi0 ${DISK_SIZE}G
 
 # =========================
 # CLOUD-INIT CONFIG
@@ -85,12 +100,14 @@ qm resize $VMID scsi0 40G
 
 qm set $VMID --ide2 $STORAGE:cloudinit
 
+# Naprawiona sekcja Cloud-Init
 qm set $VMID \
-  --ciuser $USER \
-  --ipconfig0 ip="$IP$MASK",gw=$GW \
+  --ciuser "$USER" \
   --sshkey "$SSHKEY" \
-  --nameserver $GW \
- 
+  --ipconfig0 "ip=$IP$MASK,gw=$GW" \
+  --nameserver "$GW" \
+  --hostname "$NAME"
+
 # =========================
 # SAVE IP & START VM
 # =========================
@@ -98,6 +115,4 @@ qm set $VMID \
 echo "$IP" >> "$IP_FILE"
 qm start $VMID
 
-echo "VM $NAME ($VMID) deployed successfully 🚀"
-echo "Adres IP: $IP"
-echo "Dysk: 40GB"
+echo "VM $NAME ($VMID) została pomyślnie uruchomiona! 🚀"
