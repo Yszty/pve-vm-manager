@@ -28,7 +28,7 @@ RAM_SIZE=2
 
 usage() {
     echo "Użycie: $0 [-n NAZWA] [-d DYSK_GB] [-r RAM_GB] [-y]"
-    echo "  -n  Nazwa maszyny wirtualnej"
+    echo "  -n  Nazwa maszyny wirtualnej (wymagana)"
     echo "  -d  Rozmiar dysku w GB (domyślnie 40)"
     echo "  -r  Ilość RAM w GB (domyślnie 2)"
     echo "  -y  Automatyczne potwierdzenie (tryb nieinteraktywny)"
@@ -62,10 +62,16 @@ fi
 IP="$IP_PREFIX.$NEW_OCTET"
 
 # =========================
-# INTERACTIVE INPUTS (if flags are missing)
+# USER INPUTS & VALIDATION
 # =========================
 if [ -z "$NAME" ]; then
-    read -p "Podaj nazwę VM: " NAME
+    read -p "Podaj nazwę VM (wymagane): " NAME
+fi
+
+# Walidacja nazwy
+if [ -z "$NAME" ]; then
+    echo "BŁĄD: Nazwa maszyny jest wymagana do kontynuacji."
+    exit 1
 fi
 
 if [ "$AUTO_CONFIRM" = false ]; then
@@ -132,6 +138,7 @@ qm set $VMID \
   --nameserver "$GW" \
   --hostname "$NAME"
 
+# Zapisz IP do pliku i odpali VM
 echo "$IP" >> "$IP_FILE"
 qm start $VMID
 
