@@ -17,7 +17,7 @@ GW="213.210.35.2"
 
 USER="debian"
 SSHKEY="$HOME/yszty-h.pub"
-IMAGE="/mnt/temp_drive/import/debian-13-nocloud-amd64.qcow2"
+IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 
 # Tworzenie pliku, jeśli nie istnieje
 touch "$IP_FILE"
@@ -102,7 +102,7 @@ qm set $VMID \
   --ipconfig0 ip="$IP$MASK",gw=$GW \
   --sshkey "$SSHKEY" \
   --nameserver $GW \
-  --hostname "$NAME"
+#  --hostname "$NAME"
 
 # =========================
 # SAVE IP & START VM
