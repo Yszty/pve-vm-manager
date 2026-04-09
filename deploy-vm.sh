@@ -106,7 +106,7 @@ qm set $VMID \
   --sshkey "$SSHKEY" \
   --ipconfig0 "ip=$IP$MASK,gw=$GW" \
   --nameserver "$GW" \
-  --hostname "$NAME"
+
 
 # =========================
 # SAVE IP & START VM
