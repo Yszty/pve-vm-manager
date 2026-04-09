@@ -63,11 +63,25 @@ VMID=$(qm list | awk 'NR>1 && $1 < 90000 {print $1}' | sort -n | tail -1)
 [ -z "$VMID" ] && VMID=1000
 VMID=$((VMID + 10))
 
+echo ""
 echo "--- Konfiguracja ---"
-echo "VMID: $VMID | Nazwa: $NAME"
-echo "IP:   $IP$MASK"
-echo "Disk: ${DISK_SIZE}G | RAM: ${RAM_MB}MB"
+echo "VMID:  $VMID"
+echo "Nazwa: $NAME"
+echo "IP:    $IP$MASK"
+echo "Dysk:  ${DISK_SIZE}G"
+echo "RAM:   ${RAM_MB}MB (${RAM_SIZE}GB)"
 echo "--------------------"
+
+# Pytanie o potwierdzenie (domyślnie N)
+read -p "Czy wszystko się zgadza? [y/N]: " CONFIRM
+CONFIRM=${CONFIRM,,} # Zmiana na małe litery
+
+if [[ ! "$CONFIRM" =~ ^(y|yes)$ ]]; then
+    echo "Anulowano przez użytkownika. Maszyna nie została utworzona."
+    exit 0
+fi
+
+echo "Rozpoczynam wdrażanie..."
 
 # =========================
 # CREATE VM
