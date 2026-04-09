@@ -27,11 +27,11 @@ DISK_SIZE=40
 RAM_SIZE=2
 
 usage() {
-    echo "Użycie: $0 [-n NAZWA] [-d DYSK_GB] [-r RAM_GB] [-y]"
-    echo "  -n  Nazwa maszyny wirtualnej (wymagana)"
-    echo "  -d  Rozmiar dysku w GB (domyślnie 40)"
-    echo "  -r  Ilość RAM w GB (domyślnie 2)"
-    echo "  -y  Automatyczne potwierdzenie (tryb nieinteraktywny)"
+    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y]"
+    echo "  -n  Virtual Machine name (required)"
+    echo "  -d  Disk size in GB (default: 40)"
+    echo "  -r  RAM size in GB (default: 2)"
+    echo "  -y  Auto-confirm (non-interactive mode)"
     exit 1
 }
 
@@ -56,7 +56,7 @@ else
 fi
 
 if [ "$NEW_OCTET" -gt 126 ]; then
-  echo "BŁĄD: Osiągnięto limit adresów dla maski /25!"
+  echo "ERROR: IP address limit reached for /25 subnet!"
   exit 1
 fi
 IP="$IP_PREFIX.$NEW_OCTET"
@@ -65,23 +65,21 @@ IP="$IP_PREFIX.$NEW_OCTET"
 # USER INPUTS & VALIDATION
 # =========================
 if [ -z "$NAME" ]; then
-    read -p "Podaj nazwę VM (wymagane): " NAME
+    read -p "Enter VM Name (required): " NAME
 fi
 
-# Walidacja nazwy: zaczyna się od litery, tylko litery, cyfry i pauzy
+# Name validation: starts with letter, only letters, numbers, and dashes
 if [[ ! "$NAME" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
-    echo "BŁĄD: Nazwa '$NAME' jest nieprawidłowa."
-    echo "Nazwa musi zaczynać się od litery i może zawierać tylko litery, cyfry oraz pauzy (-)."
+    echo "ERROR: Invalid name '$NAME'."
+    echo "Names must start with a letter and contain only letters, numbers, and hyphens (-)."
     exit 1
 fi
 
 if [ "$AUTO_CONFIRM" = false ]; then
-    echo "Wybierz rozmiar dysku (GB) [domyślnie $DISK_SIZE]:"
-    read -p "Rozmiar: " INPUT_DISK
+    read -p "Enter Disk size (GB) [default $DISK_SIZE]: " INPUT_DISK
     DISK_SIZE=${INPUT_DISK:-$DISK_SIZE}
 
-    echo "Wybierz RAM (GB) [domyślnie $RAM_SIZE]:"
-    read -p "RAM: " INPUT_RAM
+    read -p "Enter RAM size (GB) [default $RAM_SIZE]: " INPUT_RAM
     RAM_SIZE=${INPUT_RAM:-$RAM_SIZE}
 fi
 
@@ -90,6 +88,7 @@ RAM_MB=$((RAM_SIZE * 1024))
 # =========================
 # FIND VMID
 # =========================
+# Finds the highest VMID below 90000 and adds 10
 VMID=$(qm list | awk 'NR>1 && $1 < 90000 {print $1}' | sort -n | tail -1)
 [ -z "$VMID" ] && VMID=1000
 VMID=$((VMID + 10))
@@ -98,18 +97,18 @@ VMID=$((VMID + 10))
 # CONFIRMATION
 # =========================
 echo ""
-echo "--- Konfiguracja ---"
-echo "VMID:  $VMID"
-echo "Nazwa: $NAME"
-echo "IP:    $IP$MASK"
-echo "Dysk:  ${DISK_SIZE}G"
-echo "RAM:   ${RAM_MB}MB (${RAM_SIZE}GB)"
-echo "--------------------"
+echo "--- Deployment Configuration ---"
+echo "VMID:     $VMID"
+echo "Name:     $NAME"
+echo "IP:       $IP$MASK"
+echo "Disk:     ${DISK_SIZE}G"
+echo "RAM:      ${RAM_MB}MB (${RAM_SIZE}GB)"
+echo "--------------------------------"
 
 if [ "$AUTO_CONFIRM" = false ]; then
-    read -p "Czy wszystko się zgadza? [y/N]: " CONFIRM
+    read -p "Proceed with deployment? [y/N]: " CONFIRM
     if [[ ! "${CONFIRM,,}" =~ ^(y|yes)$ ]]; then
-        echo "Anulowano."
+        echo "Deployment cancelled."
         exit 0
     fi
 fi
@@ -117,7 +116,7 @@ fi
 # =========================
 # DEPLOYMENT
 # =========================
-echo "Rozpoczynam wdrażanie..."
+echo "Starting deployment..."
 
 qm create $VMID \
   --name "$NAME" \
@@ -136,10 +135,10 @@ qm set $VMID \
   --ciuser "$USER" \
   --sshkey "$SSHKEY" \
   --ipconfig0 "ip=$IP$MASK,gw=$GW" \
-  --nameserver "$GW" \
+  --nameserver "$GW"
 
-# Zapisz IP do pliku i odpal VM
+# Save IP to tracking file and start VM
 echo "$IP" >> "$IP_FILE"
 qm start $VMID
 
-echo "VM $NAME ($VMID) deployed successfully with IP $IP 🚀"
+echo "Success: VM $NAME ($VMID) deployed with IP $IP 🚀"
