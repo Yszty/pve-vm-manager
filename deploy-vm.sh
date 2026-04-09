@@ -26,10 +26,10 @@ read -p "Podaj nazwę VM: " NAME
 # FIND HIGHEST VMID + 10
 # =========================
 
-VMID=$(qm list | awk 'NR>1 {print $1}' | sort -n | tail -1)
+VMID=$(qm list | awk 'NR>1 && $1 < 90000 {print $1}' | sort -n | tail -1)
 
 if [ -z "$VMID" ]; then
-  VMID=8000
+  VMID=1000
 fi
 
 VMID=$((VMID + 10))
