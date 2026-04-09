@@ -105,7 +105,7 @@ qm set $VMID \
   --ciuser "$USER" \
   --sshkey "$SSHKEY" \
   --ipconfig0 "ip=$IP$MASK,gw=$GW" \
-  --nameserver "$GW" \
+  --nameserver "$GW"
 
 
 # =========================
