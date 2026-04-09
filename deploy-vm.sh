@@ -68,9 +68,10 @@ if [ -z "$NAME" ]; then
     read -p "Podaj nazwę VM (wymagane): " NAME
 fi
 
-# Walidacja nazwy
-if [ -z "$NAME" ]; then
-    echo "BŁĄD: Nazwa maszyny jest wymagana do kontynuacji."
+# Walidacja nazwy: zaczyna się od litery, tylko litery, cyfry i pauzy
+if [[ ! "$NAME" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
+    echo "BŁĄD: Nazwa '$NAME' jest nieprawidłowa."
+    echo "Nazwa musi zaczynać się od litery i może zawierać tylko litery, cyfry oraz pauzy (-)."
     exit 1
 fi
 
@@ -136,9 +137,8 @@ qm set $VMID \
   --sshkey "$SSHKEY" \
   --ipconfig0 "ip=$IP$MASK,gw=$GW" \
   --nameserver "$GW" \
-  --hostname "$NAME"
 
-# Zapisz IP do pliku i odpali VM
+# Zapisz IP do pliku i odpal VM
 echo "$IP" >> "$IP_FILE"
 qm start $VMID
 
