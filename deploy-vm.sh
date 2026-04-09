@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # =========================
-# CONFIG
+# CONFIG (Default)
 # =========================
-
 STORAGE="Storage"
 BRIDGE="vmbr0"
 VLAN=79
@@ -20,9 +19,35 @@ IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 touch "$IP_FILE"
 
 # =========================
+# FLAGS HANDLING
+# =========================
+AUTO_CONFIRM=false
+NAME=""
+DISK_SIZE=40
+RAM_SIZE=2
+
+usage() {
+    echo "Użycie: $0 [-n NAZWA] [-d DYSK_GB] [-r RAM_GB] [-y]"
+    echo "  -n  Nazwa maszyny wirtualnej"
+    echo "  -d  Rozmiar dysku w GB (domyślnie 40)"
+    echo "  -r  Ilość RAM w GB (domyślnie 2)"
+    echo "  -y  Automatyczne potwierdzenie (tryb nieinteraktywny)"
+    exit 1
+}
+
+while getopts "n:d:r:y" opt; do
+    case $opt in
+        n) NAME=$OPTARG ;;
+        d) DISK_SIZE=$OPTARG ;;
+        r) RAM_SIZE=$OPTARG ;;
+        y) AUTO_CONFIRM=true ;;
+        *) usage ;;
+    esac
+done
+
+# =========================
 # IP ALLOCATION LOGIC
 # =========================
-
 LAST_OCTET=$(awk -F. '{print $4}' "$IP_FILE" | sort -n | tail -1)
 if [ -z "$LAST_OCTET" ]; then
   NEW_OCTET=3
@@ -34,35 +59,37 @@ if [ "$NEW_OCTET" -gt 126 ]; then
   echo "BŁĄD: Osiągnięto limit adresów dla maski /25!"
   exit 1
 fi
-
 IP="$IP_PREFIX.$NEW_OCTET"
 
 # =========================
-# USER INPUTS
+# INTERACTIVE INPUTS (if flags are missing)
 # =========================
+if [ -z "$NAME" ]; then
+    read -p "Podaj nazwę VM: " NAME
+fi
 
-read -p "Podaj nazwę VM: " NAME
+if [ "$AUTO_CONFIRM" = false ]; then
+    echo "Wybierz rozmiar dysku (GB) [domyślnie $DISK_SIZE]:"
+    read -p "Rozmiar: " INPUT_DISK
+    DISK_SIZE=${INPUT_DISK:-$DISK_SIZE}
 
-# Wybór Dysku
-echo "Wybierz rozmiar dysku (GB): 25, 40, 80 lub wpisz własny (np. 100):"
-read -p "Rozmiar [40]: " DISK_SIZE
-DISK_SIZE=${DISK_SIZE:-40}
+    echo "Wybierz RAM (GB) [domyślnie $RAM_SIZE]:"
+    read -p "RAM: " INPUT_RAM
+    RAM_SIZE=${INPUT_RAM:-$RAM_SIZE}
+fi
 
-# Wybór RAM
-echo "Wybierz RAM (GB): 2, 4, 8 lub wpisz własny (np. 16):"
-read -p "RAM [2]: " RAM_SIZE
-RAM_SIZE=${RAM_SIZE:-2}
-# Przeliczenie na MB dla qm
 RAM_MB=$((RAM_SIZE * 1024))
 
 # =========================
-# FIND HIGHEST VMID + 10
+# FIND VMID
 # =========================
-
 VMID=$(qm list | awk 'NR>1 && $1 < 90000 {print $1}' | sort -n | tail -1)
 [ -z "$VMID" ] && VMID=1000
 VMID=$((VMID + 10))
 
+# =========================
+# CONFIRMATION
+# =========================
 echo ""
 echo "--- Konfiguracja ---"
 echo "VMID:  $VMID"
@@ -72,20 +99,18 @@ echo "Dysk:  ${DISK_SIZE}G"
 echo "RAM:   ${RAM_MB}MB (${RAM_SIZE}GB)"
 echo "--------------------"
 
-# Pytanie o potwierdzenie (domyślnie N)
-read -p "Czy wszystko się zgadza? [y/N]: " CONFIRM
-CONFIRM=${CONFIRM,,} # Zmiana na małe litery
-
-if [[ ! "$CONFIRM" =~ ^(y|yes)$ ]]; then
-    echo "Anulowano przez użytkownika. Maszyna nie została utworzona."
-    exit 0
+if [ "$AUTO_CONFIRM" = false ]; then
+    read -p "Czy wszystko się zgadza? [y/N]: " CONFIRM
+    if [[ ! "${CONFIRM,,}" =~ ^(y|yes)$ ]]; then
+        echo "Anulowano."
+        exit 0
+    fi
 fi
 
+# =========================
+# DEPLOYMENT
+# =========================
 echo "Rozpoczynam wdrażanie..."
-
-# =========================
-# CREATE VM
-# =========================
 
 qm create $VMID \
   --name "$NAME" \
@@ -95,38 +120,19 @@ qm create $VMID \
   --scsihw virtio-scsi-single \
   --serial0 socket --vga serial0
 
-# =========================
-# IMPORT & RESIZE DISK
-# =========================
-
 qm importdisk $VMID $IMAGE $STORAGE
-
-qm set $VMID \
-  --scsi0 $STORAGE:vm-$VMID-disk-0 \
-  --boot order=scsi0
-
-# Zmiana rozmiaru na wybrany przez użytkownika
+qm set $VMID --scsi0 $STORAGE:vm-$VMID-disk-0 --boot order=scsi0
 qm resize $VMID scsi0 ${DISK_SIZE}G
 
-# =========================
-# CLOUD-INIT CONFIG
-# =========================
-
 qm set $VMID --ide2 $STORAGE:cloudinit
-
-# Naprawiona sekcja Cloud-Init
 qm set $VMID \
   --ciuser "$USER" \
   --sshkey "$SSHKEY" \
   --ipconfig0 "ip=$IP$MASK,gw=$GW" \
-  --nameserver "$GW"
-
-
-# =========================
-# SAVE IP & START VM
-# =========================
+  --nameserver "$GW" \
+  --hostname "$NAME"
 
 echo "$IP" >> "$IP_FILE"
 qm start $VMID
 
-echo "VM $NAME ($VMID) została pomyślnie uruchomiona! 🚀"
+echo "VM $NAME ($VMID) deployed successfully with IP $IP 🚀"
