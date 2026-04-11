@@ -19,9 +19,13 @@ IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 # OVH DNS (optional): ustaw zmienne środowiskowe lub użyj -z STREFA
 # Wymagane: OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET, OVH_CONSUMER_KEY
 # Endpoint: https://eu.api.ovh.com (Europa) | https://ca.api.ovh.com (Kanada) | https://api.us.ovhcloud.com (USA)
-OVH_APPLICATION_KEY="xxx"
-OVH_APPLICATION_SECRET="yyy"
-OVH_CONSUMER_KEY="zzz"
+# Nie ustawiaj tu prawdziwych kluczy w repozytorium — użyj export przed uruchomieniem albo pliku deploy-vm.ovh.env obok skryptu.
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+[ -r "$_SCRIPT_DIR/deploy-vm.ovh.env" ] && . "$_SCRIPT_DIR/deploy-vm.ovh.env"
+
+OVH_APPLICATION_KEY="${OVH_APPLICATION_KEY:-}"
+OVH_APPLICATION_SECRET="${OVH_APPLICATION_SECRET:-}"
+OVH_CONSUMER_KEY="${OVH_CONSUMER_KEY:-}"
 OVH_ENDPOINT="${OVH_ENDPOINT:-https://eu.api.ovh.com}"
 OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
 OVH_ZONE="${OVH_ZONE:-hostier.pl}"
@@ -33,14 +37,15 @@ touch "$IP_FILE"
 ovh_sign() {
     local method="$1" url="$2" body="${3:-}" ts sig_hex
     ts=$(date +%s)
-    sig_hex=$(echo -n "${OVH_APPLICATION_SECRET}+${OVH_CONSUMER_KEY}+${method}+${url}+${body}+${ts}" | openssl dgst -sha1 | awk '{print $2}')
+    sig_hex=$(printf '%s' "${OVH_APPLICATION_SECRET}+${OVH_CONSUMER_KEY}+${method}+${url}+${body}+${ts}" \
+        | LC_ALL=C openssl dgst -sha1 | LC_ALL=C sed 's/^.* //')
     printf '%s\n' "$ts" '$1$'"$sig_hex"
 }
 
-# Zwraca treść odpowiedzi na stdout, kod HTTP w ostatniej linii (tylko cyfry)
+# Zwraca treść odpowiedzi, potem osobną linię z kodem HTTP (zawsze — nawet gdy JSON bez końcowego \n)
 ovh_http() {
     local method="$1" path="$2" body="${3:-}"
-    local url ts sig tmp code
+    local url ts sig tmp code resp_body
     url="${OVH_ENDPOINT%/}/1.0${path}"
     read -r ts sig < <(ovh_sign "$method" "$url" "$body")
     tmp=$(mktemp) || return 1
@@ -51,9 +56,10 @@ ovh_http() {
         -H "X-Ovh-Timestamp: $ts" \
         -H "X-Ovh-Signature: $sig" \
         ${body:+-d "$body"}) || code="000"
-    cat "$tmp"
+    resp_body=$(cat "$tmp")
     rm -f "$tmp"
-    echo "$code"
+    printf '%s\n' "$resp_body"
+    printf '%s\n' "$code"
 }
 
 ovh_zone_refresh() {
