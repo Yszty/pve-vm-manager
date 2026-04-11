@@ -46,8 +46,16 @@ ovh_sign() {
 ovh_http() {
     local method="$1" path="$2" body="${3:-}"
     local url ts sig tmp code resp_body
+    local -a _ovh_sign_lines
     url="${OVH_ENDPOINT%/}/1.0${path}"
-    read -r ts sig < <(ovh_sign "$method" "$url" "$body")
+    # ovh_sign drukuje 2 linie (timestamp, podpis) — pojedyncze read wczytuje tylko pierwszą; bez sig = 401
+    mapfile -t _ovh_sign_lines < <(ovh_sign "$method" "$url" "$body")
+    ts=${_ovh_sign_lines[0]}
+    sig=${_ovh_sign_lines[1]}
+    if [ -z "$ts" ] || [ -z "$sig" ]; then
+        echo "WARNING: OVH signature failed (empty ts/sig); check openssl and OVH_* keys." >&2
+        return 1
+    fi
     tmp=$(mktemp) || return 1
     code=$(curl -sS -o "$tmp" -w "%{http_code}" -X "$method" "$url" \
         -H "Content-Type: application/json" \
