@@ -30,8 +30,10 @@ OVH_ENDPOINT="${OVH_ENDPOINT:-https://eu.api.ovh.com}"
 OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
 OVH_ZONE="${OVH_ZONE:-hostier.pl}"
 # Opcjonalnie (env / deploy-vm.ovh.env): OVH_DNS_SUBDOMAIN — jawna etykieta; puste = apex (@). Nadpisuje -s.
+# Opcjonalnie: DEPLOY_VMID — stałe VMID (nadpisuje -i).
 SKIP_OVH_DNS=false
 CLI_DNS_SUB=""
+CLI_VMID=""
 
 touch "$IP_FILE"
 
@@ -140,18 +142,19 @@ DISK_SIZE=40
 RAM_SIZE=2
 
 usage() {
-    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-z OVH_ZONE] [-s SUBDOMAIN] [-D]"
+    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-z OVH_ZONE] [-s SUBDOMAIN] [-i VMID] [-D]"
     echo "  -n  Virtual Machine name (required)"
     echo "  -d  Disk size in GB (default: 40)"
     echo "  -r  RAM size in GB (default: 2)"
     echo "  -y  Auto-confirm (non-interactive mode)"
     echo "  -z  OVH DNS zone (e.g. example.com); needs OVH_APPLICATION_* + OVH_CONSUMER_KEY"
     echo "  -s  OVH DNS subdomain label (default: VM name lowercased); env OVH_DNS_SUBDOMAIN, or empty for apex"
+    echo "  -i  Proxmox VMID (manual); default: auto (max existing < 90000 + 10). Env: DEPLOY_VMID"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
 }
 
-while getopts "n:d:r:yz:s:D" opt; do
+while getopts "n:d:r:yz:s:i:D" opt; do
     case $opt in
         n) NAME=$OPTARG ;;
         d) DISK_SIZE=$OPTARG ;;
@@ -159,6 +162,7 @@ while getopts "n:d:r:yz:s:D" opt; do
         y) AUTO_CONFIRM=true ;;
         z) OVH_ZONE=$OPTARG ;;
         s) CLI_DNS_SUB=$OPTARG ;;
+        i) CLI_VMID=$OPTARG ;;
         D) SKIP_OVH_DNS=true ;;
         *) usage ;;
     esac
@@ -220,10 +224,31 @@ RAM_MB=$((RAM_SIZE * 1024))
 # =========================
 # FIND VMID
 # =========================
-# Finds the highest VMID below 90000 and adds 10
-VMID=$(qm list | awk 'NR>1 && $1 < 90000 {print $1}' | sort -n | tail -1)
-[ -z "$VMID" ] && VMID=1000
-VMID=$((VMID + 10))
+# Priorytet: -i > DEPLOY_VMID (env) > auto: najwyższy VMID < 90000 + 10
+if [ -n "$CLI_VMID" ]; then
+    VMID=$CLI_VMID
+elif [ -n "${DEPLOY_VMID:-}" ]; then
+    VMID=$DEPLOY_VMID
+else
+    VMID=$(qm list | awk 'NR>1 && $1 < 90000 {print $1}' | sort -n | tail -1)
+    [ -z "$VMID" ] && VMID=1000
+    VMID=$((VMID + 10))
+fi
+
+if [ -n "$CLI_VMID" ] || [ -n "${DEPLOY_VMID:-}" ]; then
+    if [[ ! "$VMID" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: VMID must be a non-negative integer (got '$VMID')."
+        exit 1
+    fi
+    if [ "$VMID" -lt 100 ] || [ "$VMID" -gt 999999999 ]; then
+        echo "ERROR: VMID must be between 100 and 999999999 (Proxmox range)."
+        exit 1
+    fi
+    if qm config "$VMID" &>/dev/null; then
+        echo "ERROR: VMID $VMID is already in use (qm config exists)."
+        exit 1
+    fi
+fi
 
 # =========================
 # CONFIRMATION
