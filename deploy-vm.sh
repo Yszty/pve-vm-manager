@@ -31,9 +31,11 @@ OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
 OVH_ZONE="${OVH_ZONE:-hostier.pl}"
 # Opcjonalnie (env / deploy-vm.ovh.env): OVH_DNS_SUBDOMAIN — jawna etykieta; puste = apex (@). Nadpisuje -s.
 # Opcjonalnie: DEPLOY_VMID — stałe VMID (nadpisuje -i).
+# Opcjonalnie: DEPLOY_IP — pełny IPv4 gościa (nadpisuje -p); prefiks/pula jak poniżej — bez sprawdzania duplikatu w $IP_FILE.
 SKIP_OVH_DNS=false
 CLI_DNS_SUB=""
 CLI_VMID=""
+CLI_IP=""
 
 touch "$IP_FILE"
 
@@ -142,7 +144,7 @@ DISK_SIZE=40
 RAM_SIZE=2
 
 usage() {
-    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-z OVH_ZONE] [-s SUBDOMAIN] [-i VMID] [-D]"
+    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-z OVH_ZONE] [-s SUBDOMAIN] [-i VMID] [-p IP] [-D]"
     echo "  -n  Virtual Machine name (required)"
     echo "  -d  Disk size in GB (default: 40)"
     echo "  -r  RAM size in GB (default: 2)"
@@ -150,11 +152,12 @@ usage() {
     echo "  -z  OVH DNS zone (e.g. example.com); needs OVH_APPLICATION_* + OVH_CONSUMER_KEY"
     echo "  -s  OVH DNS subdomain label (default: VM name lowercased); env OVH_DNS_SUBDOMAIN, or empty for apex"
     echo "  -i  Proxmox VMID (manual); default: auto (max existing < 90000 + 10). Env: DEPLOY_VMID"
+    echo "  -p  Guest IPv4 (manual); default: next free from $IP_FILE under $IP_PREFIX.x. Env: DEPLOY_IP"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
 }
 
-while getopts "n:d:r:yz:s:i:D" opt; do
+while getopts "n:d:r:yz:s:i:p:D" opt; do
     case $opt in
         n) NAME=$OPTARG ;;
         d) DISK_SIZE=$OPTARG ;;
@@ -163,6 +166,7 @@ while getopts "n:d:r:yz:s:i:D" opt; do
         z) OVH_ZONE=$OPTARG ;;
         s) CLI_DNS_SUB=$OPTARG ;;
         i) CLI_VMID=$OPTARG ;;
+        p) CLI_IP=$OPTARG ;;
         D) SKIP_OVH_DNS=true ;;
         *) usage ;;
     esac
@@ -171,18 +175,41 @@ done
 # =========================
 # IP ALLOCATION LOGIC
 # =========================
-LAST_OCTET=$(awk -F. '{print $4}' "$IP_FILE" | sort -n | tail -1)
-if [ -z "$LAST_OCTET" ]; then
-  NEW_OCTET=3
+# Priorytet: -p > DEPLOY_IP (env) > auto. Ręczny IP: nie weryfikujemy, czy jest już w $IP_FILE.
+if [ -n "$CLI_IP" ]; then
+    IP=$CLI_IP
+elif [ -n "${DEPLOY_IP:-}" ]; then
+    IP=$DEPLOY_IP
 else
-  NEW_OCTET=$((LAST_OCTET + 1))
+    LAST_OCTET=$(awk -F. '{print $4}' "$IP_FILE" | sort -n | tail -1)
+    if [ -z "$LAST_OCTET" ]; then
+        NEW_OCTET=3
+    else
+        NEW_OCTET=$((LAST_OCTET + 1))
+    fi
+    if [ "$NEW_OCTET" -gt 126 ]; then
+        echo "ERROR: IP address limit reached for /25 subnet!"
+        exit 1
+    fi
+    IP="$IP_PREFIX.$NEW_OCTET"
 fi
 
-if [ "$NEW_OCTET" -gt 126 ]; then
-  echo "ERROR: IP address limit reached for /25 subnet!"
-  exit 1
+if [ -n "$CLI_IP" ] || [ -n "${DEPLOY_IP:-}" ]; then
+    if [[ ! "$IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "ERROR: Invalid IPv4 address '$IP'."
+        exit 1
+    fi
+    ip_head="${IP%.*}"
+    if [ "$ip_head" != "$IP_PREFIX" ]; then
+        echo "ERROR: IP must be under $IP_PREFIX.x (same prefix as IP_PREFIX in script)."
+        exit 1
+    fi
+    mo="${IP##*.}"
+    if [ "$mo" -lt 3 ] || [ "$mo" -gt 126 ]; then
+        echo "ERROR: Last octet must be between 3 and 126 for this /25 pool (got .$mo)."
+        exit 1
+    fi
 fi
-IP="$IP_PREFIX.$NEW_OCTET"
 
 # =========================
 # USER INPUTS & VALIDATION
