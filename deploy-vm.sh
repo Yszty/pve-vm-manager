@@ -35,28 +35,28 @@ touch "$IP_FILE"
 
 # --- OVH API (v1): podpis i żądania ---
 ovh_sign() {
-    local method="$1" url="$2" body="${3:-}" ts sig_hex
+    local method="$1" url="$2" body="${3:-}" ts sig
     ts=$(date +%s)
-    sig_hex=$(printf '%s' "${OVH_APPLICATION_SECRET}+${OVH_CONSUMER_KEY}+${method}+${url}+${body}+${ts}" \
-        | LC_ALL=C openssl dgst -sha1 | LC_ALL=C sed 's/^.* //')
-    printf '%s\n' "$ts" '$1$'"$sig_hex"
+    sig=$(printf '%s' "${OVH_APPLICATION_SECRET}+${OVH_CONSUMER_KEY}+${method}+${url}+${body}+${ts}" \
+        | openssl dgst -sha1 | sed 's/^.* //')
+    printf '%s\n%s\n' "$ts" '$1$'"$sig"
 }
 
-# Zwraca treść odpowiedzi, potem osobną linię z kodem HTTP (zawsze — nawet gdy JSON bez końcowego \n)
 ovh_http() {
     local method="$1" path="$2" body="${3:-}"
-    local url ts sig tmp code resp_body
-    local -a _ovh_sign_lines
-    url="${OVH_ENDPOINT%/}/1.0${path}"
-    # ovh_sign drukuje 2 linie (timestamp, podpis) — pojedyncze read wczytuje tylko pierwszą; bez sig = 401
-    mapfile -t _ovh_sign_lines < <(ovh_sign "$method" "$url" "$body")
-    ts=${_ovh_sign_lines[0]}
-    sig=${_ovh_sign_lines[1]}
-    if [ -z "$ts" ] || [ -z "$sig" ]; then
-        echo "WARNING: OVH signature failed (empty ts/sig); check openssl and OVH_* keys." >&2
+    local url="${OVH_ENDPOINT%/}/1.0${path}"
+    local ts sig tmp code
+
+    # poprawne czytanie 2 linii
+    IFS=$'\n' read -r ts sig < <(ovh_sign "$method" "$url" "$body")
+
+    [[ -z $ts || -z $sig ]] && {
+        echo "WARNING: OVH signature failed" >&2
         return 1
-    fi
+    }
+
     tmp=$(mktemp) || return 1
+
     code=$(curl -sS -o "$tmp" -w "%{http_code}" -X "$method" "$url" \
         -H "Content-Type: application/json" \
         -H "X-Ovh-Application: $OVH_APPLICATION_KEY" \
@@ -64,10 +64,10 @@ ovh_http() {
         -H "X-Ovh-Timestamp: $ts" \
         -H "X-Ovh-Signature: $sig" \
         ${body:+-d "$body"}) || code="000"
-    resp_body=$(cat "$tmp")
+
+    cat "$tmp"
+    echo "$code"
     rm -f "$tmp"
-    printf '%s\n' "$resp_body"
-    printf '%s\n' "$code"
 }
 
 ovh_zone_refresh() {
