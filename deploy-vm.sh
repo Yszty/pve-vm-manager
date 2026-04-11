@@ -29,7 +29,9 @@ OVH_CONSUMER_KEY="${OVH_CONSUMER_KEY:-}"
 OVH_ENDPOINT="${OVH_ENDPOINT:-https://eu.api.ovh.com}"
 OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
 OVH_ZONE="${OVH_ZONE:-hostier.pl}"
+# Opcjonalnie (env / deploy-vm.ovh.env): OVH_DNS_SUBDOMAIN — jawna etykieta; puste = apex (@). Nadpisuje -s.
 SKIP_OVH_DNS=false
+CLI_DNS_SUB=""
 
 touch "$IP_FILE"
 
@@ -121,7 +123,11 @@ ovh_dns_set_a() {
     fi
 
     ovh_zone_refresh "$zone" || true
-    echo "OVH DNS: A ${sub}.${zone} -> $ip"
+    if [ -n "$sub" ]; then
+        echo "OVH DNS: A ${sub}.${zone} -> $ip"
+    else
+        echo "OVH DNS: A @ ${zone} -> $ip"
+    fi
     return 0
 }
 
@@ -134,23 +140,25 @@ DISK_SIZE=40
 RAM_SIZE=2
 
 usage() {
-    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-z OVH_ZONE] [-D]"
+    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-z OVH_ZONE] [-s SUBDOMAIN] [-D]"
     echo "  -n  Virtual Machine name (required)"
     echo "  -d  Disk size in GB (default: 40)"
     echo "  -r  RAM size in GB (default: 2)"
     echo "  -y  Auto-confirm (non-interactive mode)"
     echo "  -z  OVH DNS zone (e.g. example.com); needs OVH_APPLICATION_* + OVH_CONSUMER_KEY"
+    echo "  -s  OVH DNS subdomain label (default: VM name lowercased); env OVH_DNS_SUBDOMAIN, or empty for apex"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
 }
 
-while getopts "n:d:r:yz:D" opt; do
+while getopts "n:d:r:yz:s:D" opt; do
     case $opt in
         n) NAME=$OPTARG ;;
         d) DISK_SIZE=$OPTARG ;;
         r) RAM_SIZE=$OPTARG ;;
         y) AUTO_CONFIRM=true ;;
         z) OVH_ZONE=$OPTARG ;;
+        s) CLI_DNS_SUB=$OPTARG ;;
         D) SKIP_OVH_DNS=true ;;
         *) usage ;;
     esac
@@ -186,6 +194,19 @@ if [[ ! "$NAME" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
     exit 1
 fi
 
+# OVH DNS subdomain: -s > OVH_DNS_SUBDOMAIN (env, może być puste = apex) > nazwa VM
+if [ -n "$CLI_DNS_SUB" ]; then
+    DNS_SUB=$(echo "$CLI_DNS_SUB" | tr '[:upper:]' '[:lower:]')
+elif [ -n "${OVH_DNS_SUBDOMAIN+x}" ]; then
+    DNS_SUB=$(echo "$OVH_DNS_SUBDOMAIN" | tr '[:upper:]' '[:lower:]')
+else
+    DNS_SUB=$(echo "$NAME" | tr '[:upper:]' '[:lower:]')
+fi
+if [ -n "$DNS_SUB" ] && [[ ! "$DNS_SUB" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
+    echo "ERROR: Invalid OVH subDomain '$DNS_SUB' (use letters, digits, hyphens, dots; or empty for apex via env)."
+    exit 1
+fi
+
 if [ "$AUTO_CONFIRM" = false ]; then
     read -p "Enter Disk size (GB) [default $DISK_SIZE]: " INPUT_DISK
     DISK_SIZE=${INPUT_DISK:-$DISK_SIZE}
@@ -215,7 +236,11 @@ echo "IP:       $IP$MASK"
 echo "Disk:     ${DISK_SIZE}G"
 echo "RAM:      ${RAM_MB}MB (${RAM_SIZE}GB)"
 if [ "$SKIP_OVH_DNS" = false ] && [ -n "$OVH_ZONE" ]; then
-    echo "OVH DNS:  $(echo "$NAME" | tr '[:upper:]' '[:lower:]').$OVH_ZONE -> $IP (A)"
+    if [ -n "$DNS_SUB" ]; then
+        echo "OVH DNS:  ${DNS_SUB}.${OVH_ZONE} -> $IP (A)"
+    else
+        echo "OVH DNS:  $OVH_ZONE (apex @) -> $IP (A)"
+    fi
 fi
 echo "--------------------------------"
 
@@ -257,7 +282,6 @@ qm start $VMID
 
 if [ "$SKIP_OVH_DNS" = false ] && [ -n "$OVH_ZONE" ] \
     && [ -n "${OVH_APPLICATION_KEY:-}" ] && [ -n "${OVH_APPLICATION_SECRET:-}" ] && [ -n "${OVH_CONSUMER_KEY:-}" ]; then
-    DNS_SUB=$(echo "$NAME" | tr '[:upper:]' '[:lower:]')
     ovh_dns_set_a "$OVH_ZONE" "$DNS_SUB" "$IP" || true
 elif [ "$SKIP_OVH_DNS" = false ] && [ -n "$OVH_ZONE" ]; then
     echo "WARNING: OVH_ZONE is set but OVH_APPLICATION_KEY / OVH_APPLICATION_SECRET / OVH_CONSUMER_KEY are missing — skipping DNS." >&2
