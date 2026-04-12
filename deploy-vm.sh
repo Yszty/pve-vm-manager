@@ -10,6 +10,12 @@ if [ ! -f "$_DEPLOY_CONF" ] || [ ! -r "$_DEPLOY_CONF" ]; then
 fi
 # shellcheck source=deploy.conf
 . "$_DEPLOY_CONF"
+# Opcjonalne nadpisania (sekrety, host-specific) — plik w .gitignore, nie ginie przy git pull
+_DEPLOY_LOCAL="$_SCRIPT_DIR/deploy.local.conf"
+if [ -f "$_DEPLOY_LOCAL" ] && [ -r "$_DEPLOY_LOCAL" ]; then
+    # shellcheck source=deploy.local.conf
+    . "$_DEPLOY_LOCAL"
+fi
 
 for _req in STORAGE BRIDGE VLAN IP_FILE IP_PREFIX MASK GW USER SSHKEY IMAGE; do
     if [ -z "${!_req}" ]; then

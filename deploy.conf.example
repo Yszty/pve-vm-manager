@@ -1,5 +1,10 @@
 # Skopiuj: cp deploy.conf.example deploy.conf  (deploy.conf jest w .gitignore)
 # Edytuj deploy.conf — bash source, bez export też działa.
+#
+# Po git pull, gdy zmienia się przykład: zmerguj nowe klucze do deploy.conf (diff z example).
+# Żeby nie ustawiać od nowa kluczy OVH / SMTP / haseł: trzymaj je w deploy.local.conf
+# (tworzysz raz, plik w .gitignore — źródłowany po deploy.conf, nadpisuje zmienne).
+# Np. echo 'OVH_APPLICATION_KEY="xxx"' >> deploy.local.conf
 
 # --- Proxmox ---
 STORAGE="Storage"
