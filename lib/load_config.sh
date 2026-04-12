@@ -57,4 +57,17 @@ GUEST_PASSWORD_CONFIG="${GUEST_PASSWORD:-}"
 VM_CUSTOM_NAME="${VM_CUSTOM_NAME:-}"
 SSH_PUBLIC_KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}"
 
+# Etykieta systemu gościa (podsumowanie / mail). Puste: spróbuj z nazwy pliku IMAGE (np. debian-13-*.qcow2 → Debian 13).
+GUEST_OS_LABEL="${GUEST_OS_LABEL:-}"
+if [ -z "$GUEST_OS_LABEL" ] && [ -n "${IMAGE:-}" ]; then
+    _gos_bn=$(basename "$IMAGE")
+    if [[ "$_gos_bn" =~ ^([a-zA-Z]+)-([0-9]+(?:\.[0-9]+)?) ]]; then
+        _gos_dist="${BASH_REMATCH[1]}"
+        _gos_ver="${BASH_REMATCH[2]}"
+        GUEST_OS_LABEL="${_gos_dist^} ${_gos_ver}"
+    else
+        GUEST_OS_LABEL="$_gos_bn"
+    fi
+fi
+
 touch "$IP_FILE"

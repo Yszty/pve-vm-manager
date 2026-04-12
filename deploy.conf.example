@@ -18,6 +18,8 @@ SSH_PUBLIC_KEY_FILE="$HOME/yszty-h.pub"
 # false = nie wstrzykuj klucza z pliku (jak stary SKIP_SSHKEY=true); przy haśle klucz domyślnie i tak pomijany — chyba że -k
 CI_SSH_PUBLIC_KEY_ENABLED="true"
 IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
+# Opcjonalnie: opis systemu gościa w podsumowaniu i mailu. Puste = z nazwy pliku IMAGE (tu: Debian 13).
+# GUEST_OS_LABEL="Debian 13"
 # Opcjonalne hasło gościa; bezpieczniej: deploy-vm.sh -W / -w -
 # GUEST_PASSWORD=""
 

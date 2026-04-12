@@ -32,10 +32,11 @@ send_deploy_success_mail() {
 
     body="Wdrożenie zakończone pomyślnie.
 
-VM:       $VM_NAME
-IP:       $GUEST_IP${MASK}
-Dysk:     ${DISK_SIZE} GiB
-RAM:      ${RAM_MIB} MiB (${RAM_SIZE} GiB)
+System:        ${GUEST_OS_LABEL:-?}
+Nazwa serwera: $VM_NAME
+IPv4:            $GUEST_IP${MASK}
+Dysk:          ${DISK_SIZE} GiB
+RAM:           ${RAM_MIB} MiB (${RAM_SIZE} GiB)
 "
     if [ -n "${GUEST_PASSWORD:-}" ]; then
         body="${body}Hasło:    ${GUEST_PASSWORD}

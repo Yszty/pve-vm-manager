@@ -193,6 +193,7 @@ deploy_run() {
     echo "--- Konfiguracja wdrożenia ---"
     echo "VMID:     $VMID"
     echo "Nazwa:    $VM_NAME"
+    echo "System gościa: ${GUEST_OS_LABEL:-?}"
     echo "Gość:     $GUEST_USERNAME (cloud-init)"
     if [ -n "$GUEST_PASSWORD" ]; then
         if [ "${OPT_RANDOM_GUEST_PASSWORD:-false}" = true ]; then
