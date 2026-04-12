@@ -19,9 +19,9 @@ IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 # OVH DNS (optional): ustaw zmienne środowiskowe lub użyj -z STREFA
 # Wymagane: OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET, OVH_CONSUMER_KEY
 # Endpoint: https://eu.api.ovh.com (Europa) | https://ca.api.ovh.com (Kanada) | https://api.us.ovhcloud.com (USA)
-# Nie ustawiaj tu prawdziwych kluczy w repozytorium — użyj export przed uruchomieniem albo pliku deploy-vm.ovh.env obok skryptu.
+# Nie ustawiaj tu prawdziwych kluczy w repozytorium — użyj export przed uruchomieniem albo pliku deploy.conf obok skryptu (patrz deploy.conf.example).
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-[ -r "$_SCRIPT_DIR/deploy-vm.ovh.env" ] && . "$_SCRIPT_DIR/deploy-vm.ovh.env"
+[ -r "$_SCRIPT_DIR/deploy.conf" ] && . "$_SCRIPT_DIR/deploy.conf"
 
 OVH_APPLICATION_KEY="${OVH_APPLICATION_KEY:-}"
 OVH_APPLICATION_SECRET="${OVH_APPLICATION_SECRET:-}"
@@ -29,7 +29,7 @@ OVH_CONSUMER_KEY="${OVH_CONSUMER_KEY:-}"
 OVH_ENDPOINT="${OVH_ENDPOINT:-https://eu.api.ovh.com}"
 OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
 OVH_ZONE="${OVH_ZONE:-hostier.pl}"
-# Opcjonalnie (env / deploy-vm.ovh.env): OVH_DNS_SUBDOMAIN — jawna etykieta; puste = apex (@). Nadpisuje -s.
+# Opcjonalnie (env / deploy.conf): OVH_DNS_SUBDOMAIN — jawna etykieta; puste = apex (@). Nadpisuje -s.
 # Opcjonalnie: DEPLOY_VMID — stałe VMID (nadpisuje -i).
 # Opcjonalnie: DEPLOY_IP — pełny IPv4 gościa (nadpisuje -p); prefiks/pula jak poniżej — bez sprawdzania duplikatu w $IP_FILE.
 SKIP_OVH_DNS=false

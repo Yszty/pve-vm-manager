@@ -1,0 +1,18 @@
+# Skopiuj do deploy.conf i uzupełnij (deploy.conf jest w .gitignore).
+# Składnia: export VAR=wartość lub VAR=wartość — bash source.
+
+# --- OVH API (wymagane do DNS) ---
+# export OVH_APPLICATION_KEY=""
+# export OVH_APPLICATION_SECRET=""
+# export OVH_CONSUMER_KEY=""
+
+# export OVH_ENDPOINT="https://eu.api.ovh.com"
+# export OVH_DNS_TTL="3600"
+# export OVH_ZONE="example.com"
+
+# Opcjonalnie: subdomena DNS (puste = rekord @ / apex). Nadpisuje flaga -s.
+# export OVH_DNS_SUBDOMAIN=""
+
+# Opcjonalnie: stałe VMID / IP (nadpisują -i / -p).
+# export DEPLOY_VMID=""
+# export DEPLOY_IP=""
