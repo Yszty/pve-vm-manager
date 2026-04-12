@@ -39,13 +39,14 @@ OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
 OVH_DNS_WWW_CNAME="${OVH_DNS_WWW_CNAME:-true}"
 # OVH_DNS_AUTO_ZONE / VM_NAME_PREFIX / VM_NAME — deploy.conf; pierwszy rekord A = NAME.strefa (domyślnie NAME = VM_NAME_PREFIX+VMID).
 # OVH_DNS_FQDN / OVH_DNS_FQDNS — opcjonalny drugi (i kolejne) rekord(y). -f nadpisuje tylko opcjonalne.
-# DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p
+# DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p. Hasło gościa: VM_USER_PASSWORD / -w
 SKIP_OVH_DNS=false
 CLI_NAME=""
 CLI_FQDN=""
 CLI_VMID=""
 CLI_IP=""
 CLI_MAIL_EXTRA=""
+CLI_VM_PASSWORD=""
 
 # SMTP (deploy.conf): MAIL_SMTP_HOST puste = bez e-maila po wdrożeniu
 MAIL_SMTP_HOST="${MAIL_SMTP_HOST:-}"
@@ -60,6 +61,8 @@ MAIL_SMTP_DEBUG="${MAIL_SMTP_DEBUG:-false}"
 MAIL_FROM="${MAIL_FROM:-}"
 MAIL_ADMIN="${MAIL_ADMIN:-}"
 MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[deploy-vm]}"
+# Hasło użytkownika gościa (cloud-init / ciuser); puste = tylko SSH. Nadpisanie: -w
+VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 
 touch "$IP_FILE"
 
@@ -410,7 +413,7 @@ DNS (A):"
 AUTO_CONFIRM=false
 
 usage() {
-    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-e EMAIL] [-D]"
+    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-w PASS] [-e EMAIL] [-D]"
     echo "  -n  Nazwa VM (nadpisuje domyślną: VM_NAME_PREFIX+VMID i pierwszy rekord DNS). Env / deploy.conf: VM_NAME"
     echo "  -d  Disk size in GB (default: $DISK_GB_DEFAULT)"
     echo "  -r  RAM size in GB (default: $RAM_GB_DEFAULT)"
@@ -418,12 +421,13 @@ usage() {
     echo "  -f  OVH DNS: opcjonalny dodatkowy FQDN (drugi rekord); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS (pierwszy: NAME.strefa)"
     echo "  -i  Proxmox VMID (manual); default: losowy 1###### (cyfra 1 + 6 losowych cyfr). Env: DEPLOY_VMID"
     echo "  -p  Guest IPv4 (manual); default: next free from $IP_FILE under $IP_PREFIX.x. Env: DEPLOY_IP"
+    echo "  -w  Hasło użytkownika gościa (ciuser, np. debian); nadpisuje VM_USER_PASSWORD z deploy.conf. Widoczne w ps!"
     echo "  -e  Dodatkowy adres e-mail (poza MAIL_ADMIN); powiadomienie SMTP z deploy.conf"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
 }
 
-while getopts "n:d:r:yf:i:p:e:D" opt; do
+while getopts "n:d:r:yf:i:p:w:e:D" opt; do
     case $opt in
         n) CLI_NAME=$OPTARG ;;
         d) DISK_SIZE=$OPTARG ;;
@@ -432,6 +436,7 @@ while getopts "n:d:r:yf:i:p:e:D" opt; do
         f) CLI_FQDN=$OPTARG ;;
         i) CLI_VMID=$OPTARG ;;
         p) CLI_IP=$OPTARG ;;
+        w) CLI_VM_PASSWORD=$OPTARG ;;
         e) CLI_MAIL_EXTRA=$OPTARG ;;
         D) SKIP_OVH_DNS=true ;;
         *) usage ;;
@@ -567,6 +572,9 @@ for _o in "${OVH_DNS_OPTIONAL[@]}"; do
     OVH_DNS_TARGETS+=("$_o")
 done
 
+# Hasło konta gościa (cloud-init): -w > VM_USER_PASSWORD (deploy.conf)
+GUEST_PASSWORD="${CLI_VM_PASSWORD:-${VM_USER_PASSWORD:-}}"
+
 # =========================
 # CONFIRMATION
 # =========================
@@ -574,6 +582,12 @@ echo ""
 echo "--- Deployment Configuration ---"
 echo "VMID:     $VMID"
 echo "Name:     $NAME"
+echo "Guest:    $USER (cloud-init)"
+if [ -n "$GUEST_PASSWORD" ]; then
+    echo "Password: (ustawione — logowanie hasłem + SSH)"
+else
+    echo "Password: (brak — tylko klucz SSH)"
+fi
 echo "IP:       $IP$MASK"
 echo "Disk:     ${DISK_SIZE}G"
 echo "RAM:      ${RAM_MB}MB (${RAM_SIZE}GB)"
@@ -618,6 +632,10 @@ qm set $VMID \
   --sshkey "$SSHKEY" \
   --ipconfig0 "ip=$IP$MASK,gw=$GW" \
   --nameserver "$GW"
+
+if [ -n "$GUEST_PASSWORD" ]; then
+    qm set "$VMID" --cipassword "$GUEST_PASSWORD"
+fi
 
 # Save IP to tracking file and start VM
 echo "$IP" >> "$IP_FILE"
