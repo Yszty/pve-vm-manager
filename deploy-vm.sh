@@ -68,9 +68,10 @@ MAIL_ADMIN="${MAIL_ADMIN:-}"
 MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[deploy-vm]}"
 # Hasło użytkownika VM (cloud-init / ciuser); puste = tylko SSH. Najbezpieczniej: -W albo VM_USER_PASSWORD w deploy.local.conf
 VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
-# Przy haśle gościa: vendor-snippet z ssh_pwauth (obrazy Debian cloud często mają PasswordAuthentication no)
+# Przy haśle: jeden wspólny plik vendor (ssh_pwauth) — ta sama treść dla każdej VM, bez nowego pliku na VMID
 CLOUDINIT_SNIPPET_STORAGE="${CLOUDINIT_SNIPPET_STORAGE:-local}"
 CLOUDINIT_SNIPPETS_PATH="${CLOUDINIT_SNIPPETS_PATH:-/var/lib/vz/snippets}"
+CLOUDINIT_VENDOR_SSH_PWAUTH_FILE="${CLOUDINIT_VENDOR_SSH_PWAUTH_FILE:-deploy-vm-ssh-pwauth.yaml}"
 
 touch "$IP_FILE"
 
@@ -696,26 +697,26 @@ fi
 
 if [ -n "$GUEST_PASSWORD" ]; then
     qm set "$VMID" --cipassword "$GUEST_PASSWORD"
-    # cloud-init: włącz logowanie hasłem po SSH (bez tego obrazy typu debian-cloud trzymają PasswordAuthentication no)
-    _snip_dir="${CLOUDINIT_SNIPPETS_PATH}"
-    _snip_stor="${CLOUDINIT_SNIPPET_STORAGE}"
-    _snip_fn="deploy-vm-${VMID}-ssh-pwauth.yaml"
-    if [ ! -d "$_snip_dir" ]; then
-        echo "ERROR: Brak katalogu snippetów cloud-init: $_snip_dir — ustaw CLOUDINIT_SNIPPETS_PATH (na hoście PVE zwykle /var/lib/vz/snippets)." >&2
+    # vendor-data ssh_pwauth — jeden plik na wszystkie VM (treść stała); nadpisywany przy każdym deployu z hasłem
+    _ci_dir="${CLOUDINIT_SNIPPETS_PATH}"
+    _ci_stor="${CLOUDINIT_SNIPPET_STORAGE}"
+    _ci_fn="${CLOUDINIT_VENDOR_SSH_PWAUTH_FILE}"
+    if [ ! -d "$_ci_dir" ]; then
+        echo "ERROR: Brak katalogu dla cicustom (Snippets): $_ci_dir — ustaw CLOUDINIT_SNIPPETS_PATH." >&2
         exit 1
     fi
     {
         echo "#cloud-config"
         echo "ssh_pwauth: true"
-    } > "${_snip_dir}/${_snip_fn}" || {
-        echo "ERROR: Nie można zapisać ${_snip_dir}/${_snip_fn} (prawa zapisu?)." >&2
+    } > "${_ci_dir}/${_ci_fn}" || {
+        echo "ERROR: Nie można zapisać ${_ci_dir}/${_ci_fn}." >&2
         exit 1
     }
-    if ! qm set "$VMID" --cicustom "vendor=${_snip_stor}:snippets/${_snip_fn}"; then
-        echo "ERROR: qm set --cicustom vendor=... nie powiodło się (storage ${_snip_stor} musi obsługiwać Snippets)." >&2
+    if ! qm set "$VMID" --cicustom "vendor=${_ci_stor}:snippets/${_ci_fn}"; then
+        echo "ERROR: qm set --cicustom vendor=... nie powiodło się (storage ${_ci_stor}, Snippets, migracja klastra)." >&2
         exit 1
     fi
-    echo "Cloud-init: vendor snippet ${_snip_stor}:snippets/${_snip_fn} (ssh_pwauth: true)"
+    echo "Cloud-init: qm set --cicustom vendor=${_ci_stor}:snippets/${_ci_fn} (ssh_pwauth: true, wspólny plik)"
 fi
 
 # Save IP to tracking file and start VM
