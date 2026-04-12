@@ -1,13 +1,13 @@
 # Główna ścieżka deploy VM
 
-# (1) openssl rand -hex 7 → 14 znaków hex; (2) /dev/urandom → A–Z a–z 0–9.
+# (1) openssl: losowe bajty → base64 → tylko A–Z a–z 0–9, 14 znaków; (2) /dev/urandom — to samo.
 # Komunikat „źródło: …” idzie na stderr (&2), żeby nie mieszać się z hasłem na stdout w $(…).
 deploy_random_password_14() {
     local _p=""
     if command -v openssl >/dev/null 2>&1; then
-        _p=$(openssl rand -hex 7 2>/dev/null | tr -d '\n')
+        _p=$(openssl rand -base64 48 2>/dev/null | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 14)
         if [ "${#_p}" -eq 14 ]; then
-            echo "deploy-vm: losowe hasło — źródło: openssl rand -hex 7" >&2
+            echo "deploy-vm: losowe hasło — źródło: openssl rand -base64 (A–Z a–z 0–9)" >&2
             printf '%s' "$_p"
             return 0
         fi
@@ -197,7 +197,7 @@ deploy_run() {
     echo "Gość:     $GUEST_USERNAME (cloud-init)"
     if [ -n "$GUEST_PASSWORD" ]; then
         if [ "${OPT_RANDOM_GUEST_PASSWORD:-false}" = true ]; then
-            echo "Hasło:    $GUEST_PASSWORD (losowe, 14 znaków)"
+            echo "Hasło:    $GUEST_PASSWORD (losowe, 14 znaków: A–Z, a–z, 0–9)"
         else
             echo "Hasło:    (ustawione)"
         fi
