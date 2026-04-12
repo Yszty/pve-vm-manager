@@ -1,37 +1,36 @@
 #!/bin/bash
 
-# =========================
-# CONFIG (Default)
-# =========================
-STORAGE="Storage"
-BRIDGE="vmbr0"
-VLAN=79
-
-IP_FILE="used_ips.txt"
-IP_PREFIX="213.210.35"
-MASK="/25"
-GW="213.210.35.2"
-
-USER="debian"
-SSHKEY="$HOME/yszty-h.pub"
-IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
-
-# OVH DNS (optional): ustaw zmienne środowiskowe lub użyj -z STREFA
-# Wymagane: OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET, OVH_CONSUMER_KEY
-# Endpoint: https://eu.api.ovh.com (Europa) | https://ca.api.ovh.com (Kanada) | https://api.us.ovhcloud.com (USA)
-# Nie ustawiaj tu prawdziwych kluczy w repozytorium — użyj export przed uruchomieniem albo pliku deploy.conf obok skryptu (patrz deploy.conf.example).
+# Konfiguracja: deploy.conf (obowiązkowy), szablon: deploy.conf.example
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-[ -r "$_SCRIPT_DIR/deploy.conf" ] && . "$_SCRIPT_DIR/deploy.conf"
+_DEPLOY_CONF="$_SCRIPT_DIR/deploy.conf"
+if [ ! -f "$_DEPLOY_CONF" ] || [ ! -r "$_DEPLOY_CONF" ]; then
+    echo "ERROR: Brak pliku deploy.conf w katalogu skryptu ($_SCRIPT_DIR)." >&2
+    echo "Utwórz konfigurację: cp \"$_SCRIPT_DIR/deploy.conf.example\" \"$_DEPLOY_CONF\"  potem edytuj deploy.conf." >&2
+    exit 1
+fi
+# shellcheck source=deploy.conf
+. "$_DEPLOY_CONF"
+
+for _req in STORAGE BRIDGE VLAN IP_FILE IP_PREFIX MASK GW USER SSHKEY IMAGE; do
+    if [ -z "${!_req}" ]; then
+        echo "ERROR: deploy.conf: ustaw niepustą wartość: $_req" >&2
+        exit 1
+    fi
+done
+
+# Domyślne rozmiary (gdy nie podasz -d / -r)
+DISK_GB_DEFAULT="40"
+RAM_GB_DEFAULT="2"
+DISK_SIZE="$DISK_GB_DEFAULT"
+RAM_SIZE="$RAM_GB_DEFAULT"
 
 OVH_APPLICATION_KEY="${OVH_APPLICATION_KEY:-}"
 OVH_APPLICATION_SECRET="${OVH_APPLICATION_SECRET:-}"
 OVH_CONSUMER_KEY="${OVH_CONSUMER_KEY:-}"
 OVH_ENDPOINT="${OVH_ENDPOINT:-https://eu.api.ovh.com}"
 OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
-OVH_ZONE="${OVH_ZONE:-hostier.pl}"
-# Opcjonalnie (env / deploy.conf): OVH_DNS_SUBDOMAIN — jawna etykieta; puste = apex (@). Nadpisuje -s.
-# Opcjonalnie: DEPLOY_VMID — stałe VMID (nadpisuje -i).
-# Opcjonalnie: DEPLOY_IP — pełny IPv4 gościa (nadpisuje -p); prefiks/pula jak poniżej — bez sprawdzania duplikatu w $IP_FILE.
+OVH_ZONE="${OVH_ZONE:-}"
+# OVH_DNS_SUBDOMAIN, DEPLOY_VMID, DEPLOY_IP — tylko z deploy.conf; nadpisania: -s, -i, -p
 SKIP_OVH_DNS=false
 CLI_DNS_SUB=""
 CLI_VMID=""
@@ -146,8 +145,8 @@ RAM_SIZE=2
 usage() {
     echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-z OVH_ZONE] [-s SUBDOMAIN] [-i VMID] [-p IP] [-D]"
     echo "  -n  Virtual Machine name (required)"
-    echo "  -d  Disk size in GB (default: 40)"
-    echo "  -r  RAM size in GB (default: 2)"
+    echo "  -d  Disk size in GB (default: $DISK_GB_DEFAULT)"
+    echo "  -r  RAM size in GB (default: $RAM_GB_DEFAULT)"
     echo "  -y  Auto-confirm (non-interactive mode)"
     echo "  -z  OVH DNS zone (e.g. example.com); needs OVH_APPLICATION_* + OVH_CONSUMER_KEY"
     echo "  -s  OVH DNS subdomain label (default: VM name lowercased); env OVH_DNS_SUBDOMAIN, or empty for apex"
