@@ -27,13 +27,18 @@ send_deploy_success_mail() {
     done
     [ "${#rcpts[@]}" -eq 0 ] && return 0
 
-    local subj
+    # Temat: [pełna domena] jeśli jest (strefa DNS / FQDN auto), inaczej [tylko nazwa VM].
+    local subj _bracket
     if [ -n "${MAIL_SUBJECT:-}" ]; then
         subj="$MAIL_SUBJECT"
-    elif [ -n "${OVH_DNS_AUTO_ZONE:-}" ]; then
-        subj="[${VM_NAME}.${OVH_DNS_AUTO_ZONE}] Instalacja serwera VPS"
     else
-        subj="[${VM_NAME}] Instalacja serwera VPS"
+        _bracket="${VM_NAME}"
+        if [ -n "${OVH_DNS_AUTO_FQDN:-}" ]; then
+            _bracket="$OVH_DNS_AUTO_FQDN"
+        elif [ -n "${OVH_DNS_AUTO_ZONE:-}" ]; then
+            _bracket="${VM_NAME}.${OVH_DNS_AUTO_ZONE}"
+        fi
+        subj="[${_bracket}] Instalacja serwera VPS"
     fi
     local body tmp _t _canon _www_fqdn
 
