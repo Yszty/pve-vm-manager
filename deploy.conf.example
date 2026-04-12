@@ -47,8 +47,8 @@ OVH_DNS_FQDN=""
 # MAIL_SMTP_USER=""
 # MAIL_SMTP_PASSWORD=""
 # MAIL_FROM=""
-# MAIL_ADMIN=""                    # kopia ukryta (Bcc) dla admina
-# MAIL_TO_PUBLIC="support@hostier.pl"   # To gdy nie podano -e
+# MAIL_ADMIN=""                    # kopia ukryta (Bcc), gdy jest widoczny To (-e lub MAIL_TO_PUBLIC)
+# MAIL_TO_PUBLIC=""                # opcjonalnie To bez -e; puste i bez -e = brak maila do klienta (tylko MAIL_ADMIN = jedna wiadomość na admina)
 # MAIL_REPLY_TO="support@hostier.pl"
 # Opcjonalny temat maila (pusty = [nazwa_vm.OVH_DNS_AUTO_ZONE] Instalacja serwera VPS)
 # MAIL_SUBJECT=""

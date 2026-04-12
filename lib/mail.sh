@@ -1,19 +1,35 @@
 # Powiadomienie e-mail po deployu (SMTP + curl)
+#
+# Odbiorcy: widoczny To = -e albo MAIL_TO_PUBLIC; oba mogą być puste.
+# MAIL_ADMIN = Bcc, gdy jest widoczny To i adres różni się od To.
+# Gdy brak To, ale jest MAIL_ADMIN — jedna wiadomość, To: = MAIL_ADMIN (tylko powiadomienie dla admina).
+# Gdy brak To i brak MAIL_ADMIN — brak wysyłki (ciche pominięcie).
 
 send_deploy_success_mail() {
     local smtp_host="${MAIL_SMTP_HOST:-}"
     [ -z "$smtp_host" ] && return 0
 
     local from_a="${MAIL_FROM:-${MAIL_SMTP_USER:-}}"
-    local to_visible bcc_admin _tl _al
-    to_visible="${OPT_MAIL_EXTRA:-${MAIL_TO_PUBLIC:-support@hostier.pl}}"
+    local to_visible bcc_admin to_header _tl _al _only_admin
+
+    to_visible="${OPT_MAIL_EXTRA:-}"
+    if [ -z "$to_visible" ]; then
+        to_visible="${MAIL_TO_PUBLIC:-}"
+    fi
     bcc_admin="${MAIL_ADMIN:-}"
-    if [ -z "$from_a" ]; then
-        echo "WARNING: Brak MAIL_FROM (lub MAIL_SMTP_USER) — pomijam e-mail." >&2
+
+    if [ -z "$to_visible" ] && [ -z "$bcc_admin" ]; then
         return 0
     fi
-    if [ -z "$to_visible" ]; then
-        echo "WARNING: Brak odbiorcy To — pomijam e-mail." >&2
+
+    _only_admin=false
+    if [ -z "$to_visible" ] && [ -n "$bcc_admin" ]; then
+        to_visible="$bcc_admin"
+        _only_admin=true
+    fi
+
+    if [ -z "$from_a" ]; then
+        echo "WARNING: Brak MAIL_FROM (lub MAIL_SMTP_USER) — pomijam e-mail." >&2
         return 0
     fi
     if ! command -v curl >/dev/null 2>&1; then
@@ -22,7 +38,6 @@ send_deploy_success_mail() {
     fi
 
     local port="${MAIL_SMTP_PORT:-587}"
-    local _to_hdr
 
     # Temat: [pełna domena] jeśli jest (strefa DNS / FQDN auto), inaczej [tylko nazwa VM].
     local subj _bracket
@@ -88,10 +103,10 @@ DNS (CNAME):"
     fi
 
     tmp=$(mktemp) || return 1
-    _to_hdr="$to_visible"
+    to_header="$to_visible"
     {
         echo "From: $from_a"
-        echo "To: $_to_hdr"
+        echo "To: $to_header"
         echo "Reply-To: ${MAIL_REPLY_TO:-support@hostier.pl}"
         echo "Subject: $subj"
         echo "MIME-Version: 1.0"
@@ -128,19 +143,25 @@ DNS (CNAME):"
         smtp_url="smtp://${smtp_host}:${port}"
     fi
 
-    curl_args+=(--mail-rcpt "$to_visible")
-    _tl=$(echo "$to_visible" | tr '[:upper:]' '[:lower:]')
-    if [ -n "$bcc_admin" ]; then
-        _al=$(echo "$bcc_admin" | tr '[:upper:]' '[:lower:]')
-        if [ "$_tl" != "$_al" ]; then
-            curl_args+=(--mail-rcpt "$bcc_admin")
+    if [ "$_only_admin" = true ]; then
+        curl_args+=(--mail-rcpt "$bcc_admin")
+    else
+        curl_args+=(--mail-rcpt "$to_visible")
+        _tl=$(echo "$to_visible" | tr '[:upper:]' '[:lower:]')
+        if [ -n "$bcc_admin" ]; then
+            _al=$(echo "$bcc_admin" | tr '[:upper:]' '[:lower:]')
+            if [ "$_tl" != "$_al" ]; then
+                curl_args+=(--mail-rcpt "$bcc_admin")
+            fi
         fi
     fi
 
     if curl "${curl_args[@]}" --url "$smtp_url" --mail-from "$from_a" --upload-file "$tmp"; then
-        if [ -n "$bcc_admin" ] && [ "$_tl" != "${_al:-}" ]; then
+        if [ "$_only_admin" = true ]; then
+            echo "E-mail wysłany (SMTP $smtp_host) — tylko MAIL_ADMIN (brak -e i MAIL_TO_PUBLIC): $bcc_admin"
+        elif [ -n "$bcc_admin" ] && [ "$(echo "$to_visible" | tr '[:upper:]' '[:lower:]')" != "$(echo "$bcc_admin" | tr '[:upper:]' '[:lower:]')" ]; then
             echo "E-mail wysłany (SMTP $smtp_host) — To: $to_visible, Bcc: $bcc_admin"
-        elif [ -n "$bcc_admin" ] && [ "$_tl" = "$_al" ]; then
+        elif [ -n "$bcc_admin" ]; then
             echo "E-mail wysłany (SMTP $smtp_host) — To: $to_visible (to samo co MAIL_ADMIN, jedna dostawa)"
         else
             echo "E-mail wysłany (SMTP $smtp_host) — To: $to_visible"
