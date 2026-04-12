@@ -1,5 +1,15 @@
 #!/bin/bash
-
+#
+# deploy-vm.sh — tworzy VM na Proxmox (qm), cloud-init (vendor YAML), opcjonalnie DNS OVH i e-mail SMTP.
+# Jeden plik, bez zewnętrznych bibliotek; konfiguracja: deploy.conf (+ opcjonalnie deploy.local.conf).
+#
+# Spis sekcji (nawigacja):
+#   1) Wczytanie i walidacja deploy.conf
+#   2) Domyślne wartości i stan zmiennych (OVH, SMTP, cloud-init, CLI)
+#   3) Biblioteka funkcji: OVH API/DNS → poczta SMTP → cloud-init vendor
+#   4) Parsowanie opcji (usage, getopts)
+#   5) Główna ścieżka: IP, VMID, nazwa, cele DNS, hasło, podsumowanie, deploy, DNS po starcie, sukces
+#
 # Konfiguracja: deploy.conf (obowiązkowy), szablon: deploy.conf.example
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 _DEPLOY_CONF="$_SCRIPT_DIR/deploy.conf"
@@ -17,12 +27,15 @@ if [ -f "$_DEPLOY_LOCAL" ] && [ -r "$_DEPLOY_LOCAL" ]; then
     . "$_DEPLOY_LOCAL"
 fi
 
+# --- 1. Wczytanie konfiguracji (deploy.conf, opcjonalnie deploy.local.conf) ---
 for _req in STORAGE BRIDGE VLAN IP_FILE IP_PREFIX MASK GW USER IMAGE; do
     if [ -z "${!_req}" ]; then
         echo "ERROR: deploy.conf: ustaw niepustą wartość: $_req" >&2
         exit 1
     fi
 done
+
+# --- 2. Domyślne wartości i stan CLI / env (nadpisywane przez getopts później) ---
 # SSHKEY wymagany, jeśli nie pomijasz klucza (SKIP_SSHKEY / -K); domyślnie klucz jest ustawiany
 SKIP_SSHKEY="${SKIP_SSHKEY:-false}"
 
@@ -52,6 +65,7 @@ CLI_VM_PASSWORD=""
 CLI_VM_PASSWORD_STDIN=false
 CLI_VM_PASSWORD_PROMPT=false
 CLI_SKIP_SSHKEY=false
+# CLI_DEPLOY_PROFILE — profil cloud-init vendor (cicustom / -P); to samo co CLOUDINIT_DEPLOY_PROFILE z CLI
 CLI_DEPLOY_PROFILE=""
 CLI_CLOUDINIT_PROFILES_BOOTSTRAP=false
 
@@ -72,13 +86,33 @@ MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[deploy-vm]}"
 VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 # Cloud-init vendor (cicustom): profil deployu → plik <profil>.yml; nadpisanie nazwy: CLOUDINIT_VENDOR_FILE_OVERRIDE / stare CLOUDINIT_VENDOR_SSH_PWAUTH_FILE
 CLOUDINIT_DEPLOY_PROFILE="${CLOUDINIT_DEPLOY_PROFILE:-}"
+# Oficjalne nazwy: CLOUDINIT_CUSTOM_*; CLOUDINIT_SNIPPET_* / CLOUDINIT_SNIPPETS_* — alias legacy (kompatybilność ze starym deploy.conf)
 CLOUDINIT_CUSTOM_SNIPPET_STORAGE="${CLOUDINIT_CUSTOM_SNIPPET_STORAGE:-${CLOUDINIT_SNIPPET_STORAGE:-local}}"
 CLOUDINIT_CUSTOM_SNIPPETS_PATH="${CLOUDINIT_CUSTOM_SNIPPETS_PATH:-${CLOUDINIT_SNIPPETS_PATH:-/var/lib/vz/snippets}}"
 CLOUDINIT_VENDOR_FILE_OVERRIDE="${CLOUDINIT_VENDOR_FILE_OVERRIDE:-${CLOUDINIT_VENDOR_SSH_PWAUTH_FILE:-}}"
 
 touch "$IP_FILE"
 
-# --- OVH API (v1): podpis i żądania ---
+# --- 3. Biblioteka funkcji ---
+# --- 3a. Wspólne pomoce (wartości logiczne z deploy.conf / env) ---
+
+# Zwraca 0, gdy pierwszy argument to „prawda” (true, 1, yes, y, on, tak — bez rozróżniania wielkości liter).
+deploy_truthy() {
+    case "${1,,}" in
+        true | 1 | yes | y | on | tak) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Zwraca 0, gdy pierwszy argument to jawne „fałsz” (false, 0, no — jak wyłączanie STARTTLS w deploy.conf).
+deploy_falsey() {
+    case "${1,,}" in
+        false | 0 | no) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# --- 3b. OVH API (v1): podpis i żądania ---
 ovh_sign() {
     local method="$1" url="$2" body="${3:-}" ts sig_hex
     ts=$(date +%s)
@@ -271,10 +305,10 @@ ovh_dns_label_ok() {
 }
 
 ovh_dns_www_cname_enabled() {
-    case "${OVH_DNS_WWW_CNAME,,}" in
-        false | 0 | no) return 1 ;;
-        *) return 0 ;;
-    esac
+    if deploy_falsey "${OVH_DNS_WWW_CNAME:-true}"; then
+        return 1
+    fi
+    return 0
 }
 
 # Jeden FQDN ze stref: rekord A, potem opcjonalnie www -> CNAME
@@ -315,161 +349,7 @@ ovh_dns_apply_records_for_fqdn() {
     ovh_dns_set_cname "$z" "$www_sd" "${canon_lc}." || true
 }
 
-# --- Cloud-init vendor (qm --cicustom vendor=…) ---
-deploy_cloudinit_profile_validate() {
-    local p="$1"
-    if [ -z "$p" ] || [[ ! "$p" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-        echo "ERROR: Nieprawidłowy profil cloud-init '${p:-(pusty)}' (dozwolone: litery, cyfry, . _ -)." >&2
-        return 1
-    fi
-    return 0
-}
-
-# Priorytet: -P > CLOUDINIT_DEPLOY_PROFILE > auto (DEPLOY_USE_SSHKEY, GUEST_PASSWORD)
-deploy_cloudinit_effective_profile() {
-    if [ -n "${CLI_DEPLOY_PROFILE:-}" ]; then
-        printf '%s\n' "$CLI_DEPLOY_PROFILE"
-        return 0
-    fi
-    if [ -n "${CLOUDINIT_DEPLOY_PROFILE:-}" ]; then
-        printf '%s\n' "$CLOUDINIT_DEPLOY_PROFILE"
-        return 0
-    fi
-    if [ "$DEPLOY_USE_SSHKEY" = false ] && [ -n "${GUEST_PASSWORD:-}" ]; then
-        echo "no-ssh-key-deploy"
-    elif [ "$DEPLOY_USE_SSHKEY" = true ] && [ -n "${GUEST_PASSWORD:-}" ]; then
-        echo "password-and-ssh-deploy"
-    elif [ "$DEPLOY_USE_SSHKEY" = true ] && [ -z "${GUEST_PASSWORD:-}" ]; then
-        echo "ssh-key-only"
-    else
-        echo "standard"
-    fi
-}
-
-deploy_cloudinit_resolve_snippets_dir() {
-    local _try
-    IFS=':' read -r -a _parts <<< "${CLOUDINIT_CUSTOM_SNIPPETS_PATH:-/var/lib/vz/snippets}"
-    for _try in "${_parts[@]}"; do
-        [ -z "$_try" ] && continue
-        if [ -d "$_try" ]; then
-            printf '%s\n' "$_try"
-            return 0
-        fi
-    done
-    return 1
-}
-
-# Pełny YAML #cloud-config dla profilu — dopisuj kolejne case w deploy_cloudinit_vendor_yaml_for_profile
-deploy_cloudinit_vendor_yaml_for_profile() {
-    local p="$1"
-    local -a _lines=()
-    case "$p" in
-        no-ssh-key-deploy)
-            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
-            ;;
-        password-and-ssh-deploy)
-            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
-            ;;
-        ssh-key-only)
-            return 0
-            ;;
-        standard)
-            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
-            ;;
-        *)
-            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
-            ;;
-    esac
-    [ "${#_lines[@]}" -eq 0 ] && return 0
-    echo "#cloud-config"
-    printf '%s\n' "${_lines[@]}"
-}
-
-deploy_cloudinit_apply_vendor_custom() {
-    local vmid="$1"
-    local _prof _yaml _dir _stor _fn
-    _prof=$(deploy_cloudinit_effective_profile) || true
-    deploy_cloudinit_profile_validate "$_prof" || return 1
-    _yaml=$(deploy_cloudinit_vendor_yaml_for_profile "$_prof") || true
-    [ -z "$_yaml" ] && return 0
-
-    _dir=$(deploy_cloudinit_resolve_snippets_dir) || {
-        echo "ERROR: Żaden katalog z CLOUDINIT_CUSTOM_SNIPPETS_PATH nie istnieje: ${CLOUDINIT_CUSTOM_SNIPPETS_PATH}" >&2
-        return 1
-    }
-    _stor="${CLOUDINIT_CUSTOM_SNIPPET_STORAGE}"
-    if [ -n "${CLOUDINIT_VENDOR_FILE_OVERRIDE:-}" ]; then
-        _fn="${CLOUDINIT_VENDOR_FILE_OVERRIDE}"
-    else
-        _fn="${_prof}.yml"
-    fi
-    printf '%s\n' "$_yaml" > "${_dir}/${_fn}" || {
-        echo "ERROR: Nie można zapisać vendor cloud-init: ${_dir}/${_fn}" >&2
-        return 1
-    }
-    if ! qm set "$vmid" --cicustom "vendor=${_stor}:snippets/${_fn}"; then
-        echo "ERROR: qm set --cicustom vendor=… nie powiodło się (storage ${_stor}, Snippets)." >&2
-        return 1
-    fi
-    echo "Cloud-init: profile=${_prof} vendor=${_stor}:snippets/${_fn} (katalog: ${_dir})"
-    return 0
-}
-
-# Lista znanych profili vendor (zgodna z deploy_cloudinit_effective_profile / case w vendor_yaml)
-deploy_cloudinit_known_profiles() {
-    echo "no-ssh-key-deploy"
-    echo "password-and-ssh-deploy"
-    echo "ssh-key-only"
-    echo "standard"
-}
-
-# Szablon pliku <profil>.yml na dysku (inicjalizacja); runtime nadal generuje YAML z deploy_cloudinit_vendor_yaml_for_profile
-deploy_cloudinit_vendor_yaml_bootstrap_template() {
-    local p="$1"
-    case "$p" in
-        no-ssh-key-deploy | password-and-ssh-deploy)
-            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ${p}: typowo ssh_pwauth przy logowaniu hasłem" "ssh_pwauth: true"
-            ;;
-        ssh-key-only)
-            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ssh-key-only: zwykle bez wpisów (tylko klucz SSH)"
-            ;;
-        standard)
-            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil standard: przy deployu z hasłem skrypt ustawia ssh_pwauth: true"
-            ;;
-        *)
-            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ${p}"
-            ;;
-    esac
-}
-
-# -C: wypisz profile, utwórz brakujące pliki .yml w katalogu Snippets
-deploy_cloudinit_profiles_bootstrap() {
-    local _dir _p _fn _path
-    _dir=$(deploy_cloudinit_resolve_snippets_dir) || {
-        echo "ERROR: Brak katalogu Snippets (CLOUDINIT_CUSTOM_SNIPPETS_PATH): ${CLOUDINIT_CUSTOM_SNIPPETS_PATH}" >&2
-        return 1
-    }
-    echo "Cloud-init vendor — katalog Snippets: ${_dir}"
-    echo "Profile (pliki: <profil>.yml):"
-    while IFS= read -r _p; do
-        [ -z "$_p" ] && continue
-        _fn="${_p}.yml"
-        _path="${_dir}/${_fn}"
-        if [ -f "$_path" ]; then
-            echo "  ${_p}  →  ${_fn}  (już istnieje)"
-        else
-            echo "  ${_p}  →  ${_fn}  (tworzę)"
-            deploy_cloudinit_vendor_yaml_bootstrap_template "$_p" > "$_path" || {
-                echo "ERROR: Nie można zapisać ${_path}" >&2
-                return 1
-            }
-        fi
-    done < <(deploy_cloudinit_known_profiles)
-    echo "Gotowe. Edytuj szablony w ${_dir} lub dopisz wpisy w deploy_cloudinit_vendor_yaml_for_profile w deploy-vm.sh."
-    return 0
-}
-
-# Powiadomienie po udanym wdrożeniu (wymaga curl; MAIL_SMTP_HOST + MAIL_FROM + MAIL_ADMIN)
+# --- 3c. Poczta SMTP (powiadomienie po deployu; wymaga curl) ---
 deploy_send_success_mail() {
     local smtp_host="${MAIL_SMTP_HOST:-}"
     [ -z "$smtp_host" ] && return 0
@@ -533,12 +413,12 @@ DNS (A):"
     } > "$tmp"
 
     local -a curl_args=()
-    if [ "${MAIL_SMTP_DEBUG,,}" = "true" ] || [ "${MAIL_SMTP_DEBUG,,}" = "1" ] || [ "${MAIL_SMTP_DEBUG,,}" = "yes" ]; then
+    if deploy_truthy "${MAIL_SMTP_DEBUG:-}"; then
         curl_args+=(-v)
     else
         curl_args+=(-sS)
     fi
-    if [ "${MAIL_SMTP_INSECURE,,}" = "true" ] || [ "${MAIL_SMTP_INSECURE,,}" = "1" ] || [ "${MAIL_SMTP_INSECURE,,}" = "yes" ]; then
+    if deploy_truthy "${MAIL_SMTP_INSECURE:-}"; then
         curl_args+=(-k)
     fi
     case "${MAIL_SMTP_AUTH,,}" in
@@ -553,7 +433,7 @@ DNS (A):"
     # 465 = SMTP przez SSL (smtps); bez dodatkowego --ssl-reqd — przy OVH 587+STARTTLS często trzeba MAIL_SMTP_AUTH=login lub przejść na 465
     if [ "$port" = "465" ]; then
         smtp_url="smtps://${smtp_host}:465"
-    elif [ "${MAIL_SMTP_STARTTLS,,}" != "false" ] && [ "${MAIL_SMTP_STARTTLS,,}" != "0" ] && [ "${MAIL_SMTP_STARTTLS,,}" != "no" ]; then
+    elif ! deploy_falsey "${MAIL_SMTP_STARTTLS}"; then
         smtp_url="smtp://${smtp_host}:${port}"
         curl_args+=(--ssl-reqd)
     else
@@ -573,20 +453,183 @@ DNS (A):"
     return 0
 }
 
-# =========================
-# FLAGS HANDLING
-# =========================
+# --- 3d. Cloud-init vendor (qm --cicustom vendor=…) ---
+# Przy deployu źródłem prawdy jest YAML z deploy_cloudinit_vendor_yaml_for_profile (zapis do katalogu Snippets, potem qm set --cicustom).
+# -C tworzy szablony <profil>.yml na dysku (deploy_cloudinit_vendor_yaml_bootstrap_template); przy kolejnym deployu plik jest nadpisywany generowanym YAML.
+
+# Nowy profil: dopisz ID do DEPLOY_CLOUDINIT_PROFILES_KNOWN oraz logikę w deploy_cloudinit_effective_profile (jeśli tryb auto),
+# case w deploy_cloudinit_vendor_yaml_for_profile i w deploy_cloudinit_vendor_yaml_bootstrap_template.
+DEPLOY_CLOUDINIT_PROFILES_KNOWN=(
+    no-ssh-key-deploy
+    password-and-ssh-deploy
+    ssh-key-only
+    standard
+)
+
+deploy_cloudinit_profile_validate() {
+    local p="$1"
+    if [ -z "$p" ] || [[ ! "$p" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+        echo "ERROR: Nieprawidłowy profil cloud-init '${p:-(pusty)}' (dozwolone: litery, cyfry, . _ -)." >&2
+        return 1
+    fi
+    return 0
+}
+
+# Priorytet: -P (CLI_DEPLOY_PROFILE) > CLOUDINIT_DEPLOY_PROFILE > auto wg DEPLOY_USE_SSHKEY / GUEST_PASSWORD (ID jak w DEPLOY_CLOUDINIT_PROFILES_KNOWN)
+deploy_cloudinit_effective_profile() {
+    if [ -n "${CLI_DEPLOY_PROFILE:-}" ]; then
+        printf '%s\n' "$CLI_DEPLOY_PROFILE"
+        return 0
+    fi
+    if [ -n "${CLOUDINIT_DEPLOY_PROFILE:-}" ]; then
+        printf '%s\n' "$CLOUDINIT_DEPLOY_PROFILE"
+        return 0
+    fi
+    if [ "$DEPLOY_USE_SSHKEY" = false ] && [ -n "${GUEST_PASSWORD:-}" ]; then
+        echo "no-ssh-key-deploy"
+    elif [ "$DEPLOY_USE_SSHKEY" = true ] && [ -n "${GUEST_PASSWORD:-}" ]; then
+        echo "password-and-ssh-deploy"
+    elif [ "$DEPLOY_USE_SSHKEY" = true ] && [ -z "${GUEST_PASSWORD:-}" ]; then
+        echo "ssh-key-only"
+    else
+        echo "standard"
+    fi
+}
+
+deploy_cloudinit_resolve_snippets_dir() {
+    local _try
+    IFS=':' read -r -a _parts <<< "${CLOUDINIT_CUSTOM_SNIPPETS_PATH:-/var/lib/vz/snippets}"
+    for _try in "${_parts[@]}"; do
+        [ -z "$_try" ] && continue
+        if [ -d "$_try" ]; then
+            printf '%s\n' "$_try"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Pełny YAML #cloud-config przy deployu — dopisuj case zgodnie z DEPLOY_CLOUDINIT_PROFILES_KNOWN / deploy_cloudinit_effective_profile
+deploy_cloudinit_vendor_yaml_for_profile() {
+    local p="$1"
+    local -a _lines=()
+    case "$p" in
+        no-ssh-key-deploy)
+            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
+            ;;
+        password-and-ssh-deploy)
+            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
+            ;;
+        ssh-key-only)
+            return 0
+            ;;
+        standard)
+            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
+            ;;
+        *)
+            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
+            ;;
+    esac
+    [ "${#_lines[@]}" -eq 0 ] && return 0
+    echo "#cloud-config"
+    printf '%s\n' "${_lines[@]}"
+}
+
+deploy_cloudinit_apply_vendor_custom() {
+    local vmid="$1"
+    local _prof _yaml _dir _stor _fn
+    _prof=$(deploy_cloudinit_effective_profile) || true
+    deploy_cloudinit_profile_validate "$_prof" || return 1
+    _yaml=$(deploy_cloudinit_vendor_yaml_for_profile "$_prof") || true
+    [ -z "$_yaml" ] && return 0
+
+    _dir=$(deploy_cloudinit_resolve_snippets_dir) || {
+        echo "ERROR: Żaden katalog z CLOUDINIT_CUSTOM_SNIPPETS_PATH nie istnieje: ${CLOUDINIT_CUSTOM_SNIPPETS_PATH}" >&2
+        return 1
+    }
+    _stor="${CLOUDINIT_CUSTOM_SNIPPET_STORAGE}"
+    if [ -n "${CLOUDINIT_VENDOR_FILE_OVERRIDE:-}" ]; then
+        _fn="${CLOUDINIT_VENDOR_FILE_OVERRIDE}"
+    else
+        _fn="${_prof}.yml"
+    fi
+    printf '%s\n' "$_yaml" > "${_dir}/${_fn}" || {
+        echo "ERROR: Nie można zapisać vendor cloud-init: ${_dir}/${_fn}" >&2
+        return 1
+    }
+    if ! qm set "$vmid" --cicustom "vendor=${_stor}:snippets/${_fn}"; then
+        echo "ERROR: qm set --cicustom vendor=… nie powiodło się (storage ${_stor}, Snippets)." >&2
+        return 1
+    fi
+    echo "Cloud-init: profile=${_prof} vendor=${_stor}:snippets/${_fn} (katalog: ${_dir})"
+    return 0
+}
+
+deploy_cloudinit_known_profiles() {
+    local _p
+    for _p in "${DEPLOY_CLOUDINIT_PROFILES_KNOWN[@]}"; do
+        printf '%s\n' "$_p"
+    done
+}
+
+# Szablon pliku <profil>.yml na dysku dla -C; przy deployu YAML i tak pochodzi z deploy_cloudinit_vendor_yaml_for_profile (nadpisanie pliku)
+deploy_cloudinit_vendor_yaml_bootstrap_template() {
+    local p="$1"
+    case "$p" in
+        no-ssh-key-deploy | password-and-ssh-deploy)
+            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ${p}: typowo ssh_pwauth przy logowaniu hasłem" "ssh_pwauth: true"
+            ;;
+        ssh-key-only)
+            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ssh-key-only: zwykle bez wpisów (tylko klucz SSH)"
+            ;;
+        standard)
+            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil standard: przy deployu z hasłem skrypt ustawia ssh_pwauth: true"
+            ;;
+        *)
+            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ${p}"
+            ;;
+    esac
+}
+
+# -C: wypisz profile, utwórz brakujące pliki .yml w katalogu Snippets
+deploy_cloudinit_profiles_bootstrap() {
+    local _dir _p _fn _path
+    _dir=$(deploy_cloudinit_resolve_snippets_dir) || {
+        echo "ERROR: Brak katalogu Snippets (CLOUDINIT_CUSTOM_SNIPPETS_PATH): ${CLOUDINIT_CUSTOM_SNIPPETS_PATH}" >&2
+        return 1
+    }
+    echo "Cloud-init vendor — katalog Snippets: ${_dir}"
+    echo "Profile (pliki: <profil>.yml):"
+    while IFS= read -r _p; do
+        [ -z "$_p" ] && continue
+        _fn="${_p}.yml"
+        _path="${_dir}/${_fn}"
+        if [ -f "$_path" ]; then
+            echo "  ${_p}  →  ${_fn}  (już istnieje)"
+        else
+            echo "  ${_p}  →  ${_fn}  (tworzę)"
+            deploy_cloudinit_vendor_yaml_bootstrap_template "$_p" > "$_path" || {
+                echo "ERROR: Nie można zapisać ${_path}" >&2
+                return 1
+            }
+        fi
+    done < <(deploy_cloudinit_known_profiles)
+    echo "Gotowe. Edytuj szablony w ${_dir} lub dopisz wpisy w deploy_cloudinit_vendor_yaml_for_profile w deploy-vm.sh."
+    return 0
+}
+
+# --- 4. Parsowanie opcji (getopts) ---
 AUTO_CONFIRM=false
 
 usage() {
-    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-W] [-w PASS|-] [-e EMAIL] [-P PROFILE] [-C] [-D]"
+    echo "Składnia: $0 [-n NAZWA] [-d DYSK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-W] [-w HASŁO|-] [-e EMAIL] [-P PROFIL] [-C] [-D]"
     echo "  -n  Nazwa VM (nadpisuje domyślną: VM_NAME_PREFIX+VMID i pierwszy rekord DNS). Env / deploy.conf: VM_NAME"
-    echo "  -d  Disk size in GB (default: $DISK_GB_DEFAULT)"
-    echo "  -r  RAM size in GB (default: $RAM_GB_DEFAULT)"
-    echo "  -y  Auto-confirm (non-interactive mode)"
+    echo "  -d  Rozmiar dysku w GB (domyślnie: $DISK_GB_DEFAULT)"
+    echo "  -r  RAM w GB (domyślnie: $RAM_GB_DEFAULT)"
+    echo "  -y  Potwierdź deploy bez pytania (tryb nieinteraktywny)"
     echo "  -f  OVH DNS: opcjonalny dodatkowy FQDN (drugi rekord); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS (pierwszy: NAME.strefa)"
-    echo "  -i  Proxmox VMID (manual); default: losowy 1###### (cyfra 1 + 6 losowych cyfr). Env: DEPLOY_VMID"
-    echo "  -p  Guest IPv4 (manual); default: next free from $IP_FILE under $IP_PREFIX.x. Env: DEPLOY_IP"
+    echo "  -i  VMID Proxmox (ręcznie); domyślnie: losowy 1###### (1 + 6 cyfr). Env: DEPLOY_VMID"
+    echo "  -p  IPv4 gościa (ręcznie); domyślnie: kolejny wolny z $IP_FILE w $IP_PREFIX.x. Env: DEPLOY_IP"
     echo "  -W  Hasło gościa — pytanie ciche (read -s); hasło nie jest w argv skryptu (najbezpieczniejsze z linii poleceń)"
     echo "  -w  '-' = jedna linia hasła ze stdin (nie w argv tego skryptu). Nie wpisuj hasła w poleceniu printf|… — trafi do historii!"
     echo "      Inny argument -w = jawne hasło w argv (ps, historia — tylko automatyzacja)"
@@ -594,7 +637,7 @@ usage() {
     echo "  -K  Bez klucza SSH w cloud-init (--sshkey); w deploy.conf: SKIP_SSHKEY=true"
     echo "  -P  Profil cloud-init vendor (cicustom); nadpisuje CLOUDINIT_DEPLOY_PROFILE i tryb auto"
     echo "  -C  Wypisz znane profile vendor i utwórz brakujące pliki .yml w katalogu Snippets; kończy skrypt"
-    echo "  -D  Skip OVH DNS API for this run"
+    echo "  -D  Pomiń wywołanie API OVH DNS w tym uruchomieniu"
     exit 1
 }
 
@@ -630,14 +673,13 @@ if [ "$CLI_CLOUDINIT_PROFILES_BOOTSTRAP" = true ]; then
     exit 0
 fi
 
-# Klucz SSH w cloud-init: domyślnie tak; wyłączenie: SKIP_SSHKEY w deploy.conf (true/1/yes) lub -K
+# --- 5. Główna ścieżka deploy ---
+# Klucz SSH w cloud-init: domyślnie tak; wyłączenie: SKIP_SSHKEY w deploy.conf (true/1/yes/tak/…) lub -K
 DEPLOY_USE_SSHKEY=true
 if [ "$CLI_SKIP_SSHKEY" = true ]; then
     DEPLOY_USE_SSHKEY=false
-else
-    case "${SKIP_SSHKEY,,}" in
-        true | 1 | yes) DEPLOY_USE_SSHKEY=false ;;
-    esac
+elif deploy_truthy "${SKIP_SSHKEY}"; then
+    DEPLOY_USE_SSHKEY=false
 fi
 if [ "$DEPLOY_USE_SSHKEY" = true ]; then
     if [ -z "${SSHKEY:-}" ] || [ ! -r "$SSHKEY" ]; then
@@ -660,9 +702,7 @@ elif [ "$CLI_VM_PASSWORD_STDIN" = true ]; then
     read -r CLI_VM_PASSWORD || true
 fi
 
-# =========================
-# IP ALLOCATION LOGIC
-# =========================
+# --- 5a. Przydział IP ---
 # Priorytet: -p > DEPLOY_IP (env) > auto. Ręczny IP: nie weryfikujemy, czy jest już w $IP_FILE.
 if [ -n "$CLI_IP" ]; then
     IP=$CLI_IP
@@ -699,9 +739,7 @@ if [ -n "$CLI_IP" ] || [ -n "${DEPLOY_IP:-}" ]; then
     fi
 fi
 
-# =========================
-# DISK / RAM (interactive)
-# =========================
+# --- 5b. Dysk i RAM (interaktywnie, jeśli nie -y) ---
 if [ "$AUTO_CONFIRM" = false ]; then
     read -p "Enter Disk size (GB) [default $DISK_SIZE]: " INPUT_DISK
     DISK_SIZE=${INPUT_DISK:-$DISK_SIZE}
@@ -712,9 +750,7 @@ fi
 
 RAM_MB=$((RAM_SIZE * 1024))
 
-# =========================
-# FIND VMID (przed nazwą i DNS — nazwa = VM_NAME_PREFIX + VMID)
-# =========================
+# --- 5c. VMID (przed nazwą i DNS — nazwa = VM_NAME_PREFIX + VMID) ---
 # Priorytet: -i > DEPLOY_VMID (env) > auto: losowy 1 + 6 cyfr (1000000–1999999), aż trafisz wolny ID
 if [ -n "$CLI_VMID" ]; then
     VMID=$CLI_VMID
@@ -801,9 +837,7 @@ if [ "$DEPLOY_USE_SSHKEY" = false ] && [ -z "$GUEST_PASSWORD" ]; then
     echo "WARNING: Bez klucza SSH i bez hasła gościa logowanie z sieci zwykle niemożliwe (konsola Proxmox / inna metoda)." >&2
 fi
 
-# =========================
-# CONFIRMATION
-# =========================
+# --- 5d. Podsumowanie i potwierdzenie ---
 echo ""
 echo "--- Deployment Configuration ---"
 echo "VMID:     $VMID"
@@ -841,9 +875,7 @@ if [ "$AUTO_CONFIRM" = false ]; then
     fi
 fi
 
-# =========================
-# DEPLOYMENT
-# =========================
+# --- 5e. qm create / cloud-init / start VM ---
 echo "Starting deployment..."
 
 qm create $VMID \
