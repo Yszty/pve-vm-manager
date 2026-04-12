@@ -51,7 +51,8 @@ MAIL_SMTP_AUTH="${MAIL_SMTP_AUTH:-}"
 MAIL_SMTP_DEBUG="${MAIL_SMTP_DEBUG:-false}"
 MAIL_FROM="${MAIL_FROM:-}"
 MAIL_ADMIN="${MAIL_ADMIN:-}"
-MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[deploy-vm]}"
+# Opcjonalny pełny temat maila po deployu; pusty = domyślny [VM.strefa] Instalacja serwera VPS (patrz lib/mail.sh).
+MAIL_SUBJECT="${MAIL_SUBJECT:-}"
 
 GUEST_PASSWORD_CONFIG="${GUEST_PASSWORD:-}"
 VM_CUSTOM_NAME="${VM_CUSTOM_NAME:-}"
