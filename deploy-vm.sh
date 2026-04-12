@@ -36,7 +36,7 @@ for _req in STORAGE BRIDGE VLAN IP_FILE IP_PREFIX MASK GW USER IMAGE; do
 done
 
 # --- 2. Domyślne wartości i stan CLI / env (nadpisywane przez getopts później) ---
-# SSHKEY wymagany, jeśli nie pomijasz klucza (SKIP_SSHKEY / -K); domyślnie klucz jest ustawiany
+# SSHKEY wymagany, gdy wdrażasz bez hasła gościa (inaczej klucz nie jest dodawany — patrz GUEST_PASSWORD)
 SKIP_SSHKEY="${SKIP_SSHKEY:-false}"
 
 # Domyślne rozmiary z deploy.conf (gdy nie podasz -d / -r); zapas w skrypcie: 40 / 2
@@ -624,7 +624,7 @@ usage() {
     echo "  -w  '-' = jedna linia hasła ze stdin (nie w argv tego skryptu). Nie wpisuj hasła w poleceniu printf|… — trafi do historii!"
     echo "      Inny argument -w = jawne hasło w argv (ps, historia — tylko automatyzacja)"
     echo "  -e  Dodatkowy adres e-mail (poza MAIL_ADMIN); powiadomienie SMTP z deploy.conf"
-    echo "  -K  Bez klucza SSH w cloud-init (--sshkey); w deploy.conf: SKIP_SSHKEY=true"
+    echo "  -K  Bez klucza SSH w cloud-init; w deploy.conf: SKIP_SSHKEY=true (przy haśle gościa i tak klucza nie dodajemy)"
     echo "  -P  Profil cloud-init vendor (cicustom); nadpisuje CLOUDINIT_DEPLOY_PROFILE i tryb auto"
     echo "  -C  Wypisz znane profile vendor i utwórz brakujące pliki .yml w katalogu Snippets; kończy skrypt"
     echo "  -D  Pomiń wywołanie API OVH DNS w tym uruchomieniu"
@@ -664,18 +664,12 @@ if [ "$CLI_CLOUDINIT_PROFILES_BOOTSTRAP" = true ]; then
 fi
 
 # --- 5. Główna ścieżka deploy ---
-# Klucz SSH w cloud-init: domyślnie tak; wyłączenie: SKIP_SSHKEY w deploy.conf (true/1/yes/tak/…) lub -K
+# Klucz SSH w cloud-init: domyślnie tak; wyłączenie: SKIP_SSHKEY / -K; przy ustawionym haśle gościa klucza nie dodajemy (patrz po GUEST_PASSWORD)
 DEPLOY_USE_SSHKEY=true
 if [ "$CLI_SKIP_SSHKEY" = true ]; then
     DEPLOY_USE_SSHKEY=false
 elif deploy_truthy "${SKIP_SSHKEY}"; then
     DEPLOY_USE_SSHKEY=false
-fi
-if [ "$DEPLOY_USE_SSHKEY" = true ]; then
-    if [ -z "${SSHKEY:-}" ] || [ ! -r "$SSHKEY" ]; then
-        echo "ERROR: SSHKEY musi wskazywać na czytelny plik .pub, albo ustaw SKIP_SSHKEY=true albo użyj -K." >&2
-        exit 1
-    fi
 fi
 
 # Hasło gościa: -W (read -s), -w - (stdin). -w - nie umieszcza hasła w argv deploy-vm.sh; i tak unikaj hasła w całym poleceniu (np. printf 'haslo'|…).
@@ -817,6 +811,18 @@ done
 
 # Hasło konta gościa (cloud-init): -W / -w / -w - > VM_USER_PASSWORD (deploy.conf)
 GUEST_PASSWORD="${CLI_VM_PASSWORD:-${VM_USER_PASSWORD:-}}"
+
+# Z hasłem gościa nie dokładamy klucza SSH do cloud-init (logowanie hasłem zamiast klucza)
+if [ -n "$GUEST_PASSWORD" ]; then
+    DEPLOY_USE_SSHKEY=false
+fi
+
+if [ "$DEPLOY_USE_SSHKEY" = true ]; then
+    if [ -z "${SSHKEY:-}" ] || [ ! -r "$SSHKEY" ]; then
+        echo "ERROR: SSHKEY musi wskazywać na czytelny plik .pub, albo ustaw hasło gościa, SKIP_SSHKEY=true albo użyj -K." >&2
+        exit 1
+    fi
+fi
 
 CLOUDINIT_PROFILE_EFFECTIVE=$(deploy_cloudinit_effective_profile)
 if ! deploy_cloudinit_profile_validate "$CLOUDINIT_PROFILE_EFFECTIVE"; then
