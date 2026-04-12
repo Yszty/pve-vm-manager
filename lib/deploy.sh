@@ -1,19 +1,24 @@
 # Główna ścieżka deploy VM
 
+# (1) openssl rand -hex 7 → 14 znaków hex; (2) /dev/urandom → A–Z a–z 0–9. tr: usuwa \n z wyjścia openssl.
 deploy_random_password_14() {
     local _p=""
+    if command -v openssl >/dev/null 2>&1; then
+        _p=$(openssl rand -hex 7 2>/dev/null | tr -d '\n')
+        if [ "${#_p}" -eq 14 ]; then
+            printf '%s' "$_p"
+            echo "wygenerowal openssl!!!!!!!!!!!!!!!!!!!!"
+            return 0
+        fi
+    fi
     if [ -r /dev/urandom ]; then
-        _p=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c 14) || _p=""
+        _p=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c 14)
     fi
     if [ "${#_p}" -eq 14 ]; then
         printf '%s' "$_p"
         return 0
     fi
-    if command -v openssl >/dev/null 2>&1; then
-        openssl rand -hex 7 | tr -d '\n'
-        return 0
-    fi
-    echo "ERROR: Nie można wygenerować losowego hasła (urandom/openssl)." >&2
+    echo "ERROR: Nie można wygenerować losowego hasła (openssl/urandom)." >&2
     return 1
 }
 
