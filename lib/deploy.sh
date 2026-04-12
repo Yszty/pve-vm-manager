@@ -1,5 +1,22 @@
 # Główna ścieżka deploy VM
 
+deploy_random_password_14() {
+    local _p=""
+    if [ -r /dev/urandom ]; then
+        _p=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c 14) || _p=""
+    fi
+    if [ "${#_p}" -eq 14 ]; then
+        printf '%s' "$_p"
+        return 0
+    fi
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 7 | tr -d '\n'
+        return 0
+    fi
+    echo "ERROR: Nie można wygenerować losowego hasła (urandom/openssl)." >&2
+    return 1
+}
+
 deploy_run() {
     DISK_SIZE="$DISK_GIB_DEFAULT"
     RAM_SIZE="$RAM_GIB_DEFAULT"
@@ -21,6 +38,8 @@ deploy_run() {
     elif [ "$OPT_GUEST_PASSWORD_STDIN" = true ]; then
         OPT_GUEST_PASSWORD=""
         read -r OPT_GUEST_PASSWORD || true
+    elif [ "${OPT_RANDOM_GUEST_PASSWORD:-false}" = true ]; then
+        OPT_GUEST_PASSWORD=$(deploy_random_password_14) || exit 1
     fi
 
     if [ -n "$OPT_GUEST_IP" ]; then
@@ -173,7 +192,11 @@ deploy_run() {
     echo "Nazwa:    $VM_NAME"
     echo "Gość:     $GUEST_USERNAME (cloud-init)"
     if [ -n "$GUEST_PASSWORD" ]; then
-        echo "Hasło:    (ustawione)"
+        if [ "${OPT_RANDOM_GUEST_PASSWORD:-false}" = true ]; then
+            echo "Hasło:    $GUEST_PASSWORD (losowe, 14 znaków)"
+        else
+            echo "Hasło:    (ustawione)"
+        fi
     else
         echo "Hasło:    (brak)"
     fi
