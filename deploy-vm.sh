@@ -17,12 +17,14 @@ if [ -f "$_DEPLOY_LOCAL" ] && [ -r "$_DEPLOY_LOCAL" ]; then
     . "$_DEPLOY_LOCAL"
 fi
 
-for _req in STORAGE BRIDGE VLAN IP_FILE IP_PREFIX MASK GW USER SSHKEY IMAGE; do
+for _req in STORAGE BRIDGE VLAN IP_FILE IP_PREFIX MASK GW USER IMAGE; do
     if [ -z "${!_req}" ]; then
         echo "ERROR: deploy.conf: ustaw niepustą wartość: $_req" >&2
         exit 1
     fi
 done
+# SSHKEY wymagany, jeśli nie pomijasz klucza (SKIP_SSHKEY / -K); domyślnie klucz jest ustawiany
+SKIP_SSHKEY="${SKIP_SSHKEY:-false}"
 
 # Domyślne rozmiary z deploy.conf (gdy nie podasz -d / -r); zapas w skrypcie: 40 / 2
 DISK_GB_DEFAULT="${DISK_GB_DEFAULT:-40}"
@@ -49,6 +51,7 @@ CLI_MAIL_EXTRA=""
 CLI_VM_PASSWORD=""
 CLI_VM_PASSWORD_STDIN=false
 CLI_VM_PASSWORD_PROMPT=false
+CLI_SKIP_SSHKEY=false
 
 # SMTP (deploy.conf): MAIL_SMTP_HOST puste = bez e-maila po wdrożeniu
 MAIL_SMTP_HOST="${MAIL_SMTP_HOST:-}"
@@ -427,11 +430,12 @@ usage() {
     echo "  -w  '-' = jedna linia hasła ze stdin (nie w argv tego skryptu). Nie wpisuj hasła w poleceniu printf|… — trafi do historii!"
     echo "      Inny argument -w = jawne hasło w argv (ps, historia — tylko automatyzacja)"
     echo "  -e  Dodatkowy adres e-mail (poza MAIL_ADMIN); powiadomienie SMTP z deploy.conf"
+    echo "  -K  Bez klucza SSH w cloud-init (--sshkey); w deploy.conf: SKIP_SSHKEY=true"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
 }
 
-while getopts "n:d:r:yf:i:p:w:We:D" opt; do
+while getopts "n:d:r:yf:i:p:w:We:DK" opt; do
     case $opt in
         n) CLI_NAME=$OPTARG ;;
         d) DISK_SIZE=$OPTARG ;;
@@ -450,10 +454,27 @@ while getopts "n:d:r:yf:i:p:w:We:D" opt; do
             ;;
         W) CLI_VM_PASSWORD_PROMPT=true ;;
         e) CLI_MAIL_EXTRA=$OPTARG ;;
+        K) CLI_SKIP_SSHKEY=true ;;
         D) SKIP_OVH_DNS=true ;;
         *) usage ;;
     esac
 done
+
+# Klucz SSH w cloud-init: domyślnie tak; wyłączenie: SKIP_SSHKEY w deploy.conf (true/1/yes) lub -K
+DEPLOY_USE_SSHKEY=true
+if [ "$CLI_SKIP_SSHKEY" = true ]; then
+    DEPLOY_USE_SSHKEY=false
+else
+    case "${SKIP_SSHKEY,,}" in
+        true | 1 | yes) DEPLOY_USE_SSHKEY=false ;;
+    esac
+fi
+if [ "$DEPLOY_USE_SSHKEY" = true ]; then
+    if [ -z "${SSHKEY:-}" ] || [ ! -r "$SSHKEY" ]; then
+        echo "ERROR: SSHKEY musi wskazywać na czytelny plik .pub, albo ustaw SKIP_SSHKEY=true albo użyj -K." >&2
+        exit 1
+    fi
+fi
 
 # Hasło gościa: -W (read -s), -w - (stdin). -w - nie umieszcza hasła w argv deploy-vm.sh; i tak unikaj hasła w całym poleceniu (np. printf 'haslo'|…).
 if [ "$CLI_VM_PASSWORD_PROMPT" = true ]; then
@@ -601,6 +622,10 @@ done
 # Hasło konta gościa (cloud-init): -W / -w / -w - > VM_USER_PASSWORD (deploy.conf)
 GUEST_PASSWORD="${CLI_VM_PASSWORD:-${VM_USER_PASSWORD:-}}"
 
+if [ "$DEPLOY_USE_SSHKEY" = false ] && [ -z "$GUEST_PASSWORD" ]; then
+    echo "WARNING: Bez klucza SSH i bez hasła gościa logowanie z sieci zwykle niemożliwe (konsola Proxmox / inna metoda)." >&2
+fi
+
 # =========================
 # CONFIRMATION
 # =========================
@@ -610,9 +635,14 @@ echo "VMID:     $VMID"
 echo "Name:     $NAME"
 echo "Guest:    $USER (cloud-init)"
 if [ -n "$GUEST_PASSWORD" ]; then
-    echo "Password: (ustawione — logowanie hasłem + SSH)"
+    echo "Password: (ustawione)"
 else
-    echo "Password: (brak — tylko klucz SSH)"
+    echo "Password: (brak)"
+fi
+if [ "$DEPLOY_USE_SSHKEY" = true ]; then
+    echo "SSH key:  $SSHKEY"
+else
+    echo "SSH key:  (pominięty)"
 fi
 echo "IP:       $IP$MASK"
 echo "Disk:     ${DISK_SIZE}G"
@@ -655,9 +685,11 @@ qm resize $VMID scsi0 ${DISK_SIZE}G
 qm set $VMID --ide2 $STORAGE:cloudinit
 qm set $VMID \
   --ciuser "$USER" \
-  --sshkey "$SSHKEY" \
   --ipconfig0 "ip=$IP$MASK,gw=$GW" \
   --nameserver "$GW"
+if [ "$DEPLOY_USE_SSHKEY" = true ]; then
+    qm set "$VMID" --sshkey "$SSHKEY"
+fi
 
 if [ -n "$GUEST_PASSWORD" ]; then
     qm set "$VMID" --cipassword "$GUEST_PASSWORD"
