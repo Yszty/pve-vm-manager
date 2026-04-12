@@ -38,8 +38,18 @@ IPv4:            $GUEST_IP${MASK}
 Dysk:          ${DISK_SIZE} GiB
 RAM:           ${RAM_MIB} MiB (${RAM_SIZE} GiB)
 "
+    body="${body}
+Użytkownik: ${GUEST_USERNAME}
+"
     if [ -n "${GUEST_PASSWORD:-}" ]; then
         body="${body}Hasło:    ${GUEST_PASSWORD}
+"
+    fi
+    if [ "${INJECT_SSH_PUBLIC_KEY:-false}" = true ]; then
+        body="${body}Logowanie: klucz publiczny SSH (cloud-init) — ${EFFECTIVE_SSH_PUBLIC_KEY_FILE}
+"
+    elif [ -z "${GUEST_PASSWORD:-}" ]; then
+        body="${body}Logowanie: (brak hasła w deployu; bez wstrzykniętego klucza SSH)
 "
     fi
 
