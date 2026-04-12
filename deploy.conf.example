@@ -22,7 +22,8 @@ USER="debian"
 SSHKEY="$HOME/yszty-h.pub"
 IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 # Opcjonalne hasło dla USER w gościu (cloud-init); puste = tylko SSH.
-# Bezpieczniej niż -w HASLO: ./deploy-vm.sh -W  (ciche wpisanie) lub: printf '%s\n' "$HASLO" | ./deploy-vm.sh -w -
+# Unikaj hasła w jednej linii poleceń (historia/ps). Lepiej: ./deploy-vm.sh -W (ciche pytanie)
+# albo hasło w tym pliku / deploy.local.conf, albo: ./deploy-vm.sh -w - < plik_z_haslem (chmod 600)
 # VM_USER_PASSWORD=""
 
 # Domyślne rozmiary (gdy nie podasz -d / -r)

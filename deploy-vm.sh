@@ -39,7 +39,7 @@ OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
 OVH_DNS_WWW_CNAME="${OVH_DNS_WWW_CNAME:-true}"
 # OVH_DNS_AUTO_ZONE / VM_NAME_PREFIX / VM_NAME — deploy.conf; pierwszy rekord A = NAME.strefa (domyślnie NAME = VM_NAME_PREFIX+VMID).
 # OVH_DNS_FQDN / OVH_DNS_FQDNS — opcjonalny drugi (i kolejne) rekord(y). -f nadpisuje tylko opcjonalne.
-# DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p. Hasło gościa: VM_USER_PASSWORD / -W / -w -
+# DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p. Hasło gościa: VM_USER_PASSWORD / -W / -w - (stdin)
 SKIP_OVH_DNS=false
 CLI_NAME=""
 CLI_FQDN=""
@@ -63,7 +63,7 @@ MAIL_SMTP_DEBUG="${MAIL_SMTP_DEBUG:-false}"
 MAIL_FROM="${MAIL_FROM:-}"
 MAIL_ADMIN="${MAIL_ADMIN:-}"
 MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[deploy-vm]}"
-# Hasło użytkownika gościa (cloud-init / ciuser); puste = tylko SSH. Bezpiecznie: -W lub -w -
+# Hasło użytkownika gościa (cloud-init / ciuser); puste = tylko SSH. Najbezpieczniej: -W albo VM_USER_PASSWORD w deploy.local.conf
 VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 
 touch "$IP_FILE"
@@ -423,8 +423,9 @@ usage() {
     echo "  -f  OVH DNS: opcjonalny dodatkowy FQDN (drugi rekord); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS (pierwszy: NAME.strefa)"
     echo "  -i  Proxmox VMID (manual); default: losowy 1###### (cyfra 1 + 6 losowych cyfr). Env: DEPLOY_VMID"
     echo "  -p  Guest IPv4 (manual); default: next free from $IP_FILE under $IP_PREFIX.x. Env: DEPLOY_IP"
-    echo "  -W  Hasło użytkownika gościa — wpis w trybie cichym (bez historii poleceń jak przy zwykłym wpisywaniu)"
-    echo "  -w  Hasło gościa: '-' = jedna linia ze stdin (bez historii); inaczej jawny tekst (ps/historia — niezalecane)"
+    echo "  -W  Hasło gościa — pytanie ciche (read -s); hasło nie jest w argv skryptu (najbezpieczniejsze z linii poleceń)"
+    echo "  -w  '-' = jedna linia hasła ze stdin (nie w argv tego skryptu). Nie wpisuj hasła w poleceniu printf|… — trafi do historii!"
+    echo "      Inny argument -w = jawne hasło w argv (ps, historia — tylko automatyzacja)"
     echo "  -e  Dodatkowy adres e-mail (poza MAIL_ADMIN); powiadomienie SMTP z deploy.conf"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
@@ -444,7 +445,7 @@ while getopts "n:d:r:yf:i:p:w:We:D" opt; do
                 CLI_VM_PASSWORD_STDIN=true
             else
                 CLI_VM_PASSWORD=$OPTARG
-                echo "WARNING: hasło po -w jest widoczne w ps i może trafić do historii; użyj -W albo -w - (hasło ze stdin)." >&2
+                echo "WARNING: hasło w argumencie -w jest widoczne w ps i w historii; użyj -W albo -w - ze stdin (np. plik: -w - < plik)." >&2
             fi
             ;;
         W) CLI_VM_PASSWORD_PROMPT=true ;;
@@ -454,7 +455,7 @@ while getopts "n:d:r:yf:i:p:w:We:D" opt; do
     esac
 done
 
-# Bezpieczne źródło hasła gościa: -W (read -s z /dev/tty), -w - (stdin). Priorytet: -W przed -w -
+# Hasło gościa: -W (read -s), -w - (stdin). -w - nie umieszcza hasła w argv deploy-vm.sh; i tak unikaj hasła w całym poleceniu (np. printf 'haslo'|…).
 if [ "$CLI_VM_PASSWORD_PROMPT" = true ]; then
     CLI_VM_PASSWORD=""
     if [ -r /dev/tty ]; then
