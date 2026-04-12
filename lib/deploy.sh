@@ -47,7 +47,6 @@ deploy_run() {
         read -r OPT_GUEST_PASSWORD || true
     elif [ "${OPT_RANDOM_GUEST_PASSWORD:-false}" = true ]; then
         OPT_GUEST_PASSWORD=$(deploy_random_password_14) || exit 1
-        OPT_GUEST_PASSWORD=$(printf '%s' "$OPT_GUEST_PASSWORD" | tr -d '\r\n')
     fi
 
     if [ -n "$OPT_GUEST_IP" ]; then
@@ -170,17 +169,13 @@ deploy_run() {
     done
 
     GUEST_PASSWORD="${OPT_GUEST_PASSWORD:-${GUEST_PASSWORD_CONFIG:-}}"
+    # Jedna linia dla chpasswd w vendor YAML (profil password-login-allowed): usuń LF/CR
+    # z całego łańcucha — m.in. CRLF z deploy.conf, narzędzia na Windows, przypadki $(…).
+    GUEST_PASSWORD=$(printf '%s' "$GUEST_PASSWORD" | tr -d '\r\n')
 
     CI_VENDOR_PROFILE_EFFECTIVE=$(ci_effective_profile)
     if ! ci_validate_profile "$CI_VENDOR_PROFILE_EFFECTIVE"; then
         exit 1
-    fi
-
-    if [ "$CI_VENDOR_PROFILE_EFFECTIVE" = "password-login-allowed" ] && [ -n "${GUEST_PASSWORD:-}" ]; then
-        if printf '%s' "$GUEST_PASSWORD" | grep -q $'\n'; then
-            echo "ERROR: Hasło nie może zawierać znaku nowej linii (profil password-login-allowed)." >&2
-            exit 1
-        fi
     fi
 
     guest_auth_resolve

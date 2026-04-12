@@ -16,17 +16,17 @@ ci_validate_profile() {
 
 ci_effective_profile() {
     if [ -n "${OPT_CI_VENDOR_PROFILE:-}" ]; then
-        printf '%s\n' "$OPT_CI_VENDOR_PROFILE"
+        printf '%s' "$OPT_CI_VENDOR_PROFILE"
         return 0
     fi
     if [ -n "${CI_VENDOR_PROFILE:-}" ]; then
-        printf '%s\n' "$CI_VENDOR_PROFILE"
+        printf '%s' "$CI_VENDOR_PROFILE"
         return 0
     fi
     if [ -n "${GUEST_PASSWORD:-}" ]; then
-        echo "password-login-allowed"
+        printf '%s' "password-login-allowed"
     else
-        echo "password-login-not-allowed"
+        printf '%s' "password-login-not-allowed"
     fi
 }
 
