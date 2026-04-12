@@ -54,7 +54,7 @@ RAM:           ${RAM_MIB} MiB (${RAM_SIZE} GiB)
 Użytkownik: ${GUEST_USERNAME}
 "
     if [ -n "${GUEST_PASSWORD:-}" ]; then
-        body="${body}Hasło:    ${GUEST_PASSWORD}
+        body="${body}Hasło:    ${GUEST_PASSWORD} (hasło musi zostać zmienione przy pierwszym logowaniu)
 "
     fi
     if [ "${INJECT_SSH_PUBLIC_KEY:-false}" = true ]; then
