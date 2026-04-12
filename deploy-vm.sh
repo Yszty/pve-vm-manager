@@ -18,9 +18,9 @@ for _req in STORAGE BRIDGE VLAN IP_FILE IP_PREFIX MASK GW USER SSHKEY IMAGE; do
     fi
 done
 
-# Domyślne rozmiary (gdy nie podasz -d / -r)
-DISK_GB_DEFAULT="40"
-RAM_GB_DEFAULT="2"
+# Domyślne rozmiary z deploy.conf (gdy nie podasz -d / -r); zapas w skrypcie: 40 / 2
+DISK_GB_DEFAULT="${DISK_GB_DEFAULT:-40}"
+RAM_GB_DEFAULT="${RAM_GB_DEFAULT:-2}"
 DISK_SIZE="$DISK_GB_DEFAULT"
 RAM_SIZE="$RAM_GB_DEFAULT"
 
