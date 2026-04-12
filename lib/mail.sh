@@ -34,8 +34,8 @@ send_deploy_success_mail() {
 
 VM:       $VM_NAME
 IP:       $GUEST_IP${MASK}
-Dysk:     ${DISK_SIZE}G
-RAM:      ${RAM_SIZE}GB
+Dysk:     ${DISK_SIZE} GiB
+RAM:      ${RAM_MIB} MiB (${RAM_SIZE} GiB)
 "
     if [ -n "${GUEST_PASSWORD:-}" ]; then
         body="${body}Hasło:    ${GUEST_PASSWORD}

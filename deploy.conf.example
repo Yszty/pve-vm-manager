@@ -52,9 +52,9 @@ OVH_DNS_FQDN=""
 # MAIL_SMTP_STARTTLS="true"
 # MAIL_SMTP_INSECURE="false"
 
-# --- 7. Rozmiary i nazwa VM ---
-DISK_GB_DEFAULT="40"
-RAM_GB_DEFAULT="2"
+# --- 7. Rozmiary i nazwa VM (GiB = gibibajty, 1024; jak qm resize …G i pamięć VM) ---
+DISK_GIB_DEFAULT="40"
+RAM_GIB_DEFAULT="2"
 VM_NAME_PREFIX="server"
 # Opcjonalna nazwa zamiast VM_NAME_PREFIX+VMID:
 # VM_CUSTOM_NAME=""

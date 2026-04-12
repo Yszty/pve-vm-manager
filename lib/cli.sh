@@ -17,10 +17,10 @@ OPT_CI_VENDOR_PROFILE=""
 OPT_CI_BOOTSTRAP=false
 
 usage() {
-    echo "Składnia: $0 [-n NAZWA] [-d DYSK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-k PLIK_PUB] [-W] [-w HASŁO|-] [-e EMAIL] [-P PROFIL] [-C] [-D]"
+    echo "Składnia: $0 [-n NAZWA] [-d DYSK_GiB] [-r RAM_GiB] [-y] [-f FQDN] [-i VMID] [-p IP] [-k PLIK_PUB] [-W] [-w HASŁO|-] [-e EMAIL] [-P PROFIL] [-C] [-D]"
     echo "  -n  Nazwa VM (VM_NAME_PREFIX+VMID, pierwszy DNS). Opcjonalnie: VM_CUSTOM_NAME w deploy.conf"
-    echo "  -d  Dysk (GB), domyślnie: $DISK_GB_DEFAULT"
-    echo "  -r  RAM (GB), domyślnie: $RAM_GB_DEFAULT"
+    echo "  -d  Dysk (GiB), domyślnie: $DISK_GIB_DEFAULT"
+    echo "  -r  RAM (GiB), domyślnie: $RAM_GIB_DEFAULT"
     echo "  -y  Deploy bez pytania"
     echo "  -f  Dodatkowy FQDN (OVH DNS); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS"
     echo "  -i  VMID (ręcznie); domyślnie losowy 1######. Env: DEPLOY_VMID"

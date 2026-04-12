@@ -1,8 +1,8 @@
 # Główna ścieżka deploy VM
 
 deploy_run() {
-    DISK_SIZE="$DISK_GB_DEFAULT"
-    RAM_SIZE="$RAM_GB_DEFAULT"
+    DISK_SIZE="$DISK_GIB_DEFAULT"
+    RAM_SIZE="$RAM_GIB_DEFAULT"
     parse_cli "$@"
 
     if [ "$OPT_CI_BOOTSTRAP" = true ]; then
@@ -61,13 +61,13 @@ deploy_run() {
     fi
 
     if [ "$AUTO_CONFIRM" = false ]; then
-        read -r -p "Rozmiar dysku (GB) [${DISK_SIZE}]: " INPUT_DISK
+        read -r -p "Rozmiar dysku (GiB) [${DISK_SIZE}]: " INPUT_DISK
         DISK_SIZE=${INPUT_DISK:-$DISK_SIZE}
-        read -r -p "RAM (GB) [${RAM_SIZE}]: " INPUT_RAM
+        read -r -p "RAM (GiB) [${RAM_SIZE}]: " INPUT_RAM
         RAM_SIZE=${INPUT_RAM:-$RAM_SIZE}
     fi
 
-    RAM_MB=$((RAM_SIZE * 1024))
+    RAM_MIB=$((RAM_SIZE * 1024))
 
     if [ -n "$OPT_VMID" ]; then
         VMID=$OPT_VMID
@@ -184,8 +184,8 @@ deploy_run() {
     fi
     echo "Profil vendor CI: $CI_VENDOR_PROFILE_EFFECTIVE (${CI_VENDOR_PROFILE_EFFECTIVE}.yml)"
     echo "IP:       $GUEST_IP$MASK"
-    echo "Dysk:     ${DISK_SIZE}G"
-    echo "RAM:      ${RAM_MB}MB (${RAM_SIZE}GB)"
+    echo "Dysk:     ${DISK_SIZE} GiB"
+    echo "RAM:      ${RAM_MIB} MiB (${RAM_SIZE} GiB)"
     if [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ]; then
         local _t
         for _t in "${OVH_DNS_TARGETS[@]}"; do
@@ -209,7 +209,7 @@ deploy_run() {
 
     qm create "$VMID" \
         --name "$VM_NAME" \
-        --memory "$RAM_MB" \
+        --memory "$RAM_MIB" \
         --cores 2 \
         --net0 "virtio,bridge=$BRIDGE,tag=$VLAN" \
         --scsihw virtio-scsi-single \
