@@ -27,10 +27,13 @@ OVH_APPLICATION_SECRET=""
 OVH_CONSUMER_KEY=""
 OVH_ENDPOINT="https://eu.api.ovh.com"
 OVH_DNS_TTL="3600"
-OVH_ZONE="hostier.pl"
 
-# Opcjonalnie: subdomena (puste = apex @). Nadpisuje -s.
-# OVH_DNS_SUBDOMAIN=""
+# Pełna nazwa rekordu A (FQDN) — skrypt sam dopasuje strefę i subdomenę do API OVH.
+# Przykład apex (rekord @): wpisz samą domenę strefy, np. "hostier.pl"
+OVH_DNS_FQDN="vm1.hostier.pl"
+
+# Opcjonalnie wiele rekordów A (ta sama maszyna / ten sam IP) — zamiast OVH_DNS_FQDN:
+# OVH_DNS_FQDNS=( "vm1.hostier.pl" "backup.inna-domena.pl" )
 
 # Opcjonalnie: stałe VMID / IP (nadpisują -i / -p)
 # DEPLOY_VMID=""

@@ -29,10 +29,10 @@ OVH_APPLICATION_SECRET="${OVH_APPLICATION_SECRET:-}"
 OVH_CONSUMER_KEY="${OVH_CONSUMER_KEY:-}"
 OVH_ENDPOINT="${OVH_ENDPOINT:-https://eu.api.ovh.com}"
 OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
-OVH_ZONE="${OVH_ZONE:-}"
-# OVH_DNS_SUBDOMAIN, DEPLOY_VMID, DEPLOY_IP — tylko z deploy.conf; nadpisania: -s, -i, -p
+# OVH_DNS_FQDN / OVH_DNS_FQDNS — deploy.conf; pełna nazwa rekordu (np. vm1.domena.pl lub domena.pl dla @). Rozdzielenie zone/sub przez API.
+# DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p
 SKIP_OVH_DNS=false
-CLI_DNS_SUB=""
+CLI_FQDN=""
 CLI_VMID=""
 CLI_IP=""
 
@@ -134,36 +134,76 @@ ovh_dns_set_a() {
     return 0
 }
 
+# Lista stref DNS na koncie (JSON array) -> jedna strefa na linii, najdłuższe nazwy pierwsze (dopasowanie foo.co.uk)
+ovh_fetch_zones_sorted() {
+    local resp code body
+    resp=$(ovh_http GET "/domain/zone" "")
+    code=$(echo "$resp" | tail -n1)
+    body=$(echo "$resp" | sed '$d')
+    if [ "$code" != "200" ]; then
+        echo "WARNING: OVH GET /domain/zone failed HTTP $code${body:+ — $body}" >&2
+        return 1
+    fi
+    echo "$body" | grep -oE '"[^"]+"' | tr -d '"' \
+        | while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            lc=$(echo "$line" | tr '[:upper:]' '[:lower:]')
+            printf '%05d\t%s\n' "${#lc}" "$lc"
+        done | sort -rn | cut -f2-
+}
+
+# FQDN + lista stref -> stdout: pierwsza linia zone, druga subDomain (pusta = @)
+ovh_resolve_fqdn() {
+    local fqdn="$1" zones_txt="$2"
+    local fqdn_lc z sub z_lc
+    fqdn_lc=$(echo "$fqdn" | tr '[:upper:]' '[:lower:]' | sed 's/\.$//')
+    [ -z "$fqdn_lc" ] && return 1
+    while IFS= read -r z; do
+        [ -z "$z" ] && continue
+        z_lc=$(echo "$z" | tr '[:upper:]' '[:lower:]')
+        if [ "$fqdn_lc" = "$z_lc" ]; then
+            printf '%s\n' "$z"
+            printf '%s\n' ""
+            return 0
+        fi
+        case "$fqdn_lc" in
+            *."$z_lc")
+                sub=${fqdn_lc%."$z_lc"}
+                printf '%s\n' "$z"
+                printf '%s\n' "$sub"
+                return 0
+                ;;
+        esac
+    done <<< "$zones_txt"
+    return 1
+}
+
 # =========================
 # FLAGS HANDLING
 # =========================
 AUTO_CONFIRM=false
 NAME=""
-DISK_SIZE=40
-RAM_SIZE=2
 
 usage() {
-    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-z OVH_ZONE] [-s SUBDOMAIN] [-i VMID] [-p IP] [-D]"
+    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-D]"
     echo "  -n  Virtual Machine name (required)"
     echo "  -d  Disk size in GB (default: $DISK_GB_DEFAULT)"
     echo "  -r  RAM size in GB (default: $RAM_GB_DEFAULT)"
     echo "  -y  Auto-confirm (non-interactive mode)"
-    echo "  -z  OVH DNS zone (e.g. example.com); needs OVH_APPLICATION_* + OVH_CONSUMER_KEY"
-    echo "  -s  OVH DNS subdomain label (default: VM name lowercased); env OVH_DNS_SUBDOMAIN, or empty for apex"
+    echo "  -f  OVH DNS: pełna nazwa rekordu (np. vm1.example.com lub example.com dla @); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS z deploy.conf"
     echo "  -i  Proxmox VMID (manual); default: auto (max existing < 90000 + 10). Env: DEPLOY_VMID"
     echo "  -p  Guest IPv4 (manual); default: next free from $IP_FILE under $IP_PREFIX.x. Env: DEPLOY_IP"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
 }
 
-while getopts "n:d:r:yz:s:i:p:D" opt; do
+while getopts "n:d:r:yf:i:p:D" opt; do
     case $opt in
         n) NAME=$OPTARG ;;
         d) DISK_SIZE=$OPTARG ;;
         r) RAM_SIZE=$OPTARG ;;
         y) AUTO_CONFIRM=true ;;
-        z) OVH_ZONE=$OPTARG ;;
-        s) CLI_DNS_SUB=$OPTARG ;;
+        f) CLI_FQDN=$OPTARG ;;
         i) CLI_VMID=$OPTARG ;;
         p) CLI_IP=$OPTARG ;;
         D) SKIP_OVH_DNS=true ;;
@@ -224,17 +264,14 @@ if [[ ! "$NAME" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
     exit 1
 fi
 
-# OVH DNS subdomain: -s > OVH_DNS_SUBDOMAIN (env, może być puste = apex) > nazwa VM
-if [ -n "$CLI_DNS_SUB" ]; then
-    DNS_SUB=$(echo "$CLI_DNS_SUB" | tr '[:upper:]' '[:lower:]')
-elif [ -n "${OVH_DNS_SUBDOMAIN+x}" ]; then
-    DNS_SUB=$(echo "$OVH_DNS_SUBDOMAIN" | tr '[:upper:]' '[:lower:]')
-else
-    DNS_SUB=$(echo "$NAME" | tr '[:upper:]' '[:lower:]')
-fi
-if [ -n "$DNS_SUB" ] && [[ ! "$DNS_SUB" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
-    echo "ERROR: Invalid OVH subDomain '$DNS_SUB' (use letters, digits, hyphens, dots; or empty for apex via env)."
-    exit 1
+# Cele rekordów A (FQDN): -f > tablica OVH_DNS_FQDNS > pojedynczy OVH_DNS_FQDN (deploy.conf)
+OVH_DNS_TARGETS=()
+if [ -n "$CLI_FQDN" ]; then
+    OVH_DNS_TARGETS=("$CLI_FQDN")
+elif [ -n "${OVH_DNS_FQDNS+x}" ] && [ "${#OVH_DNS_FQDNS[@]}" -gt 0 ]; then
+    OVH_DNS_TARGETS=("${OVH_DNS_FQDNS[@]}")
+elif [ -n "${OVH_DNS_FQDN:-}" ]; then
+    OVH_DNS_TARGETS=("$OVH_DNS_FQDN")
 fi
 
 if [ "$AUTO_CONFIRM" = false ]; then
@@ -286,12 +323,10 @@ echo "Name:     $NAME"
 echo "IP:       $IP$MASK"
 echo "Disk:     ${DISK_SIZE}G"
 echo "RAM:      ${RAM_MB}MB (${RAM_SIZE}GB)"
-if [ "$SKIP_OVH_DNS" = false ] && [ -n "$OVH_ZONE" ]; then
-    if [ -n "$DNS_SUB" ]; then
-        echo "OVH DNS:  ${DNS_SUB}.${OVH_ZONE} -> $IP (A)"
-    else
-        echo "OVH DNS:  $OVH_ZONE (apex @) -> $IP (A)"
-    fi
+if [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ]; then
+    for _t in "${OVH_DNS_TARGETS[@]}"; do
+        echo "OVH DNS:  ${_t} -> $IP (A)"
+    done
 fi
 echo "--------------------------------"
 
@@ -331,11 +366,29 @@ qm set $VMID \
 echo "$IP" >> "$IP_FILE"
 qm start $VMID
 
-if [ "$SKIP_OVH_DNS" = false ] && [ -n "$OVH_ZONE" ] \
+if [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ] \
     && [ -n "${OVH_APPLICATION_KEY:-}" ] && [ -n "${OVH_APPLICATION_SECRET:-}" ] && [ -n "${OVH_CONSUMER_KEY:-}" ]; then
-    ovh_dns_set_a "$OVH_ZONE" "$DNS_SUB" "$IP" || true
-elif [ "$SKIP_OVH_DNS" = false ] && [ -n "$OVH_ZONE" ]; then
-    echo "WARNING: OVH_ZONE is set but OVH_APPLICATION_KEY / OVH_APPLICATION_SECRET / OVH_CONSUMER_KEY are missing — skipping DNS." >&2
+    _zones_sorted=$(ovh_fetch_zones_sorted) || _zones_sorted=""
+    if [ -z "$_zones_sorted" ]; then
+        echo "WARNING: Nie udało się pobrać listy stref OVH (/domain/zone) — pomijam DNS." >&2
+    else
+        for _fqdn in "${OVH_DNS_TARGETS[@]}"; do
+            _resolved=$(ovh_resolve_fqdn "$_fqdn" "$_zones_sorted") || _resolved=""
+            if [ -z "$_resolved" ]; then
+                echo "WARNING: FQDN '$_fqdn' nie pasuje do żadnej strefy DNS na tym koncie OVH — pomijam ten rekord." >&2
+                continue
+            fi
+            _z=$(echo "$_resolved" | sed -n '1p')
+            _sd=$(echo "$_resolved" | sed -n '2p')
+            if [ -n "$_sd" ] && [[ ! "$_sd" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
+                echo "WARNING: Odrzucono subdomenę '$_sd' (nieprawidłowa etykieta) dla '$_fqdn'." >&2
+                continue
+            fi
+            ovh_dns_set_a "$_z" "$_sd" "$IP" || true
+        done
+    fi
+elif [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ]; then
+    echo "WARNING: OVH DNS (FQDN) skonfigurowane, ale brak OVH_APPLICATION_KEY / OVH_APPLICATION_SECRET / OVH_CONSUMER_KEY — pomijam DNS." >&2
 fi
 
 echo "Success: VM $NAME ($VMID) deployed with IP $IP 🚀"
