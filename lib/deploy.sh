@@ -1,13 +1,14 @@
 # Główna ścieżka deploy VM
 
-# (1) openssl rand -hex 7 → 14 znaków hex; (2) /dev/urandom → A–Z a–z 0–9. tr: usuwa \n z wyjścia openssl.
+# (1) openssl rand -hex 7 → 14 znaków hex; (2) /dev/urandom → A–Z a–z 0–9.
+# Komunikat „źródło: …” idzie na stderr (&2), żeby nie mieszać się z hasłem na stdout w $(…).
 deploy_random_password_14() {
     local _p=""
     if command -v openssl >/dev/null 2>&1; then
         _p=$(openssl rand -hex 7 2>/dev/null | tr -d '\n')
         if [ "${#_p}" -eq 14 ]; then
+            echo "deploy-vm: losowe hasło — źródło: openssl rand -hex 7" >&2
             printf '%s' "$_p"
-            echo "wygenerowal openssl!!!!!!!!!!!!!!!!!!!!"
             return 0
         fi
     fi
@@ -15,6 +16,7 @@ deploy_random_password_14() {
         _p=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c 14)
     fi
     if [ "${#_p}" -eq 14 ]; then
+        echo "deploy-vm: losowe hasło — źródło: /dev/urandom (A–Z a–z 0–9)" >&2
         printf '%s' "$_p"
         return 0
     fi
@@ -45,6 +47,7 @@ deploy_run() {
         read -r OPT_GUEST_PASSWORD || true
     elif [ "${OPT_RANDOM_GUEST_PASSWORD:-false}" = true ]; then
         OPT_GUEST_PASSWORD=$(deploy_random_password_14) || exit 1
+        OPT_GUEST_PASSWORD=$(printf '%s' "$OPT_GUEST_PASSWORD" | tr -d '\r\n')
     fi
 
     if [ -n "$OPT_GUEST_IP" ]; then
