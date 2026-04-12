@@ -29,7 +29,7 @@ OVH_APPLICATION_SECRET="${OVH_APPLICATION_SECRET:-}"
 OVH_CONSUMER_KEY="${OVH_CONSUMER_KEY:-}"
 OVH_ENDPOINT="${OVH_ENDPOINT:-https://eu.api.ovh.com}"
 OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
-# OVH_DNS_AUTO_* — deploy.conf; zawsze pierwszy rekord A (prefix + 6 cyfr + strefa).
+# OVH_DNS_AUTO_ZONE / VM_NAME_PREFIX — deploy.conf; pierwszy rekord A = VM_NAME_PREFIX+VMID.strefa (jak nazwa VM).
 # OVH_DNS_FQDN / OVH_DNS_FQDNS — opcjonalny drugi (i kolejne) rekord(y). -f nadpisuje tylko opcjonalne.
 # DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p
 SKIP_OVH_DNS=false
@@ -183,24 +183,21 @@ ovh_resolve_fqdn() {
 # FLAGS HANDLING
 # =========================
 AUTO_CONFIRM=false
-NAME=""
 
 usage() {
-    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-D]"
-    echo "  -n  Virtual Machine name (required)"
+    echo "Usage: $0 [-d DISK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-D]"
     echo "  -d  Disk size in GB (default: $DISK_GB_DEFAULT)"
     echo "  -r  RAM size in GB (default: $RAM_GB_DEFAULT)"
     echo "  -y  Auto-confirm (non-interactive mode)"
-    echo "  -f  OVH DNS: opcjonalny dodatkowy FQDN (drugi rekord); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS z deploy.conf (pierwszy rekord: zawsze serwer1+6cyfr.strefa)"
+    echo "  -f  OVH DNS: opcjonalny dodatkowy FQDN (drugi rekord); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS (pierwszy: VM_NAME_PREFIX+VMID.strefa, jak nazwa VM)"
     echo "  -i  Proxmox VMID (manual); default: losowy 1###### (cyfra 1 + 6 losowych cyfr). Env: DEPLOY_VMID"
     echo "  -p  Guest IPv4 (manual); default: next free from $IP_FILE under $IP_PREFIX.x. Env: DEPLOY_IP"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
 }
 
-while getopts "n:d:r:yf:i:p:D" opt; do
+while getopts "d:r:yf:i:p:D" opt; do
     case $opt in
-        n) NAME=$OPTARG ;;
         d) DISK_SIZE=$OPTARG ;;
         r) RAM_SIZE=$OPTARG ;;
         y) AUTO_CONFIRM=true ;;
@@ -252,44 +249,8 @@ if [ -n "$CLI_IP" ] || [ -n "${DEPLOY_IP:-}" ]; then
 fi
 
 # =========================
-# USER INPUTS & VALIDATION
+# DISK / RAM (interactive)
 # =========================
-if [ -z "$NAME" ]; then
-    read -p "Enter VM Name (required): " NAME
-fi
-
-# Name validation: starts with letter, only letters, numbers, and dashes
-if [[ ! "$NAME" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
-    echo "ERROR: Invalid name '$NAME'."
-    echo "Names must start with a letter and contain only letters, numbers, and hyphens (-)."
-    exit 1
-fi
-
-# Rekordy A: (1) zawsze serwer1+6cyfr.strefa gdy DNS włączony; (2) opcjonalnie: -f > OVH_DNS_FQDNS > OVH_DNS_FQDN
-OVH_DNS_OPTIONAL=()
-if [ -n "$CLI_FQDN" ]; then
-    OVH_DNS_OPTIONAL=("$CLI_FQDN")
-elif [ -n "${OVH_DNS_FQDNS+x}" ] && [ "${#OVH_DNS_FQDNS[@]}" -gt 0 ]; then
-    OVH_DNS_OPTIONAL=("${OVH_DNS_FQDNS[@]}")
-elif [ -n "${OVH_DNS_FQDN:-}" ]; then
-    OVH_DNS_OPTIONAL=("$OVH_DNS_FQDN")
-fi
-
-OVH_DNS_TARGETS=()
-OVH_DNS_AUTO_FQDN=""
-if [ "$SKIP_OVH_DNS" = false ]; then
-    if [ -z "${OVH_DNS_AUTO_PREFIX:-}" ] || [ -z "${OVH_DNS_AUTO_ZONE:-}" ]; then
-        echo "ERROR: deploy.conf: ustaw OVH_DNS_AUTO_PREFIX i OVH_DNS_AUTO_ZONE (pierwszy, zawsze tworzony rekord A)." >&2
-        exit 1
-    fi
-    _r6=$(command -v shuf >/dev/null 2>&1 && shuf -i 0-999999 -n 1 || awk 'BEGIN{srand(); print int(rand() * 1000000)}')
-    OVH_DNS_AUTO_FQDN="${OVH_DNS_AUTO_PREFIX}$(printf '%06d' "$_r6").${OVH_DNS_AUTO_ZONE}"
-    OVH_DNS_TARGETS+=("$OVH_DNS_AUTO_FQDN")
-fi
-for _o in "${OVH_DNS_OPTIONAL[@]}"; do
-    OVH_DNS_TARGETS+=("$_o")
-done
-
 if [ "$AUTO_CONFIRM" = false ]; then
     read -p "Enter Disk size (GB) [default $DISK_SIZE]: " INPUT_DISK
     DISK_SIZE=${INPUT_DISK:-$DISK_SIZE}
@@ -301,7 +262,7 @@ fi
 RAM_MB=$((RAM_SIZE * 1024))
 
 # =========================
-# FIND VMID
+# FIND VMID (przed nazwą i DNS — nazwa = VM_NAME_PREFIX + VMID)
 # =========================
 # Priorytet: -i > DEPLOY_VMID (env) > auto: losowy 1 + 6 cyfr (1000000–1999999), aż trafisz wolny ID
 if [ -n "$CLI_VMID" ]; then
@@ -339,6 +300,33 @@ if [ -n "$CLI_VMID" ] || [ -n "${DEPLOY_VMID:-}" ]; then
         exit 1
     fi
 fi
+
+VM_NAME_PREFIX="${VM_NAME_PREFIX:-server}"
+NAME="${VM_NAME_PREFIX}${VMID}"
+
+# Rekordy A: (1) ${VM_NAME_PREFIX}+VMID.strefa = jak nazwa VM; (2) opcjonalnie: -f > OVH_DNS_FQDNS > OVH_DNS_FQDN
+OVH_DNS_OPTIONAL=()
+if [ -n "$CLI_FQDN" ]; then
+    OVH_DNS_OPTIONAL=("$CLI_FQDN")
+elif [ -n "${OVH_DNS_FQDNS+x}" ] && [ "${#OVH_DNS_FQDNS[@]}" -gt 0 ]; then
+    OVH_DNS_OPTIONAL=("${OVH_DNS_FQDNS[@]}")
+elif [ -n "${OVH_DNS_FQDN:-}" ]; then
+    OVH_DNS_OPTIONAL=("$OVH_DNS_FQDN")
+fi
+
+OVH_DNS_TARGETS=()
+OVH_DNS_AUTO_FQDN=""
+if [ "$SKIP_OVH_DNS" = false ]; then
+    if [ -z "${OVH_DNS_AUTO_ZONE:-}" ]; then
+        echo "ERROR: deploy.conf: ustaw OVH_DNS_AUTO_ZONE (pierwszy rekord A: ${VM_NAME_PREFIX}<VMID>.<strefa>)." >&2
+        exit 1
+    fi
+    OVH_DNS_AUTO_FQDN="${VM_NAME_PREFIX}${VMID}.${OVH_DNS_AUTO_ZONE}"
+    OVH_DNS_TARGETS+=("$OVH_DNS_AUTO_FQDN")
+fi
+for _o in "${OVH_DNS_OPTIONAL[@]}"; do
+    OVH_DNS_TARGETS+=("$_o")
+done
 
 # =========================
 # CONFIRMATION

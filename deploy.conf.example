@@ -21,6 +21,9 @@ IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 DISK_GB_DEFAULT="40"
 RAM_GB_DEFAULT="2"
 
+# Nazwa VM zawsze: VM_NAME_PREFIX + VMID (np. server1847392). Domyślnie prefix "server".
+# VM_NAME_PREFIX="server"
+
 # --- OVH DNS (API) ---
 OVH_APPLICATION_KEY=""
 OVH_APPLICATION_SECRET=""
@@ -28,9 +31,8 @@ OVH_CONSUMER_KEY=""
 OVH_ENDPOINT="https://eu.api.ovh.com"
 OVH_DNS_TTL="3600"
 
-# Pierwszy rekord A — zawsze (gdy DNS włączony, bez -D): PREFIX + 6 losowych cyfr + .STREFA
-# Np. serwer1847392.hostier.pl
-OVH_DNS_AUTO_PREFIX="serwer1"
+# Pierwszy rekord A — ten sam host co nazwa VM: <VM_NAME_PREFIX><VMID>.<strefa>
+# Np. server1847392.hostier.pl
 OVH_DNS_AUTO_ZONE="hostier.pl"
 
 # Drugi rekord (opcjonalny) — ten sam IP; puste = tylko rekord auto powyżej
