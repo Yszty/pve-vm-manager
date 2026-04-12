@@ -39,7 +39,7 @@ OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
 OVH_DNS_WWW_CNAME="${OVH_DNS_WWW_CNAME:-true}"
 # OVH_DNS_AUTO_ZONE / VM_NAME_PREFIX / VM_NAME — deploy.conf; pierwszy rekord A = NAME.strefa (domyślnie NAME = VM_NAME_PREFIX+VMID).
 # OVH_DNS_FQDN / OVH_DNS_FQDNS — opcjonalny drugi (i kolejne) rekord(y). -f nadpisuje tylko opcjonalne.
-# DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p. Hasło gościa: VM_USER_PASSWORD / -w
+# DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p. Hasło gościa: VM_USER_PASSWORD / -W / -w -
 SKIP_OVH_DNS=false
 CLI_NAME=""
 CLI_FQDN=""
@@ -47,6 +47,8 @@ CLI_VMID=""
 CLI_IP=""
 CLI_MAIL_EXTRA=""
 CLI_VM_PASSWORD=""
+CLI_VM_PASSWORD_STDIN=false
+CLI_VM_PASSWORD_PROMPT=false
 
 # SMTP (deploy.conf): MAIL_SMTP_HOST puste = bez e-maila po wdrożeniu
 MAIL_SMTP_HOST="${MAIL_SMTP_HOST:-}"
@@ -61,7 +63,7 @@ MAIL_SMTP_DEBUG="${MAIL_SMTP_DEBUG:-false}"
 MAIL_FROM="${MAIL_FROM:-}"
 MAIL_ADMIN="${MAIL_ADMIN:-}"
 MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[deploy-vm]}"
-# Hasło użytkownika gościa (cloud-init / ciuser); puste = tylko SSH. Nadpisanie: -w
+# Hasło użytkownika gościa (cloud-init / ciuser); puste = tylko SSH. Bezpiecznie: -W lub -w -
 VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 
 touch "$IP_FILE"
@@ -413,7 +415,7 @@ DNS (A):"
 AUTO_CONFIRM=false
 
 usage() {
-    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-w PASS] [-e EMAIL] [-D]"
+    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-W] [-w PASS|-] [-e EMAIL] [-D]"
     echo "  -n  Nazwa VM (nadpisuje domyślną: VM_NAME_PREFIX+VMID i pierwszy rekord DNS). Env / deploy.conf: VM_NAME"
     echo "  -d  Disk size in GB (default: $DISK_GB_DEFAULT)"
     echo "  -r  RAM size in GB (default: $RAM_GB_DEFAULT)"
@@ -421,13 +423,14 @@ usage() {
     echo "  -f  OVH DNS: opcjonalny dodatkowy FQDN (drugi rekord); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS (pierwszy: NAME.strefa)"
     echo "  -i  Proxmox VMID (manual); default: losowy 1###### (cyfra 1 + 6 losowych cyfr). Env: DEPLOY_VMID"
     echo "  -p  Guest IPv4 (manual); default: next free from $IP_FILE under $IP_PREFIX.x. Env: DEPLOY_IP"
-    echo "  -w  Hasło użytkownika gościa (ciuser, np. debian); nadpisuje VM_USER_PASSWORD z deploy.conf. Widoczne w ps!"
+    echo "  -W  Hasło użytkownika gościa — wpis w trybie cichym (bez historii poleceń jak przy zwykłym wpisywaniu)"
+    echo "  -w  Hasło gościa: '-' = jedna linia ze stdin (bez historii); inaczej jawny tekst (ps/historia — niezalecane)"
     echo "  -e  Dodatkowy adres e-mail (poza MAIL_ADMIN); powiadomienie SMTP z deploy.conf"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
 }
 
-while getopts "n:d:r:yf:i:p:w:e:D" opt; do
+while getopts "n:d:r:yf:i:p:w:We:D" opt; do
     case $opt in
         n) CLI_NAME=$OPTARG ;;
         d) DISK_SIZE=$OPTARG ;;
@@ -436,12 +439,34 @@ while getopts "n:d:r:yf:i:p:w:e:D" opt; do
         f) CLI_FQDN=$OPTARG ;;
         i) CLI_VMID=$OPTARG ;;
         p) CLI_IP=$OPTARG ;;
-        w) CLI_VM_PASSWORD=$OPTARG ;;
+        w)
+            if [ "$OPTARG" = "-" ]; then
+                CLI_VM_PASSWORD_STDIN=true
+            else
+                CLI_VM_PASSWORD=$OPTARG
+                echo "WARNING: hasło po -w jest widoczne w ps i może trafić do historii; użyj -W albo -w - (hasło ze stdin)." >&2
+            fi
+            ;;
+        W) CLI_VM_PASSWORD_PROMPT=true ;;
         e) CLI_MAIL_EXTRA=$OPTARG ;;
         D) SKIP_OVH_DNS=true ;;
         *) usage ;;
     esac
 done
+
+# Bezpieczne źródło hasła gościa: -W (read -s z /dev/tty), -w - (stdin). Priorytet: -W przed -w -
+if [ "$CLI_VM_PASSWORD_PROMPT" = true ]; then
+    CLI_VM_PASSWORD=""
+    if [ -r /dev/tty ]; then
+        read -r -s -p "Hasło użytkownika gościa ($USER): " CLI_VM_PASSWORD </dev/tty || true
+    else
+        read -r -s -p "Hasło użytkownika gościa ($USER): " CLI_VM_PASSWORD || true
+    fi
+    echo "" >&2
+elif [ "$CLI_VM_PASSWORD_STDIN" = true ]; then
+    CLI_VM_PASSWORD=""
+    read -r CLI_VM_PASSWORD || true
+fi
 
 # =========================
 # IP ALLOCATION LOGIC
@@ -572,7 +597,7 @@ for _o in "${OVH_DNS_OPTIONAL[@]}"; do
     OVH_DNS_TARGETS+=("$_o")
 done
 
-# Hasło konta gościa (cloud-init): -w > VM_USER_PASSWORD (deploy.conf)
+# Hasło konta gościa (cloud-init): -W / -w / -w - > VM_USER_PASSWORD (deploy.conf)
 GUEST_PASSWORD="${CLI_VM_PASSWORD:-${VM_USER_PASSWORD:-}}"
 
 # =========================

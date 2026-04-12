@@ -21,7 +21,8 @@ GW="213.210.35.2"
 USER="debian"
 SSHKEY="$HOME/yszty-h.pub"
 IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
-# Opcjonalne hasło dla USER w gościu (cloud-init); puste = tylko SSH. Nadpisanie: ./deploy-vm.sh -w HASLO
+# Opcjonalne hasło dla USER w gościu (cloud-init); puste = tylko SSH.
+# Bezpieczniej niż -w HASLO: ./deploy-vm.sh -W  (ciche wpisanie) lub: printf '%s\n' "$HASLO" | ./deploy-vm.sh -w -
 # VM_USER_PASSWORD=""
 
 # Domyślne rozmiary (gdy nie podasz -d / -r)
