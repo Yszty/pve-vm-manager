@@ -27,6 +27,10 @@ IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 # Unikaj hasła w jednej linii poleceń (historia/ps). Lepiej: ./deploy-vm.sh -W (ciche pytanie)
 # albo hasło w tym pliku / deploy.local.conf, albo: ./deploy-vm.sh -w - < plik_z_haslem (chmod 600)
 # VM_USER_PASSWORD=""
+# Przy ustawionym haśle skrypt dodaje vendor-snippet cloud-init (ssh_pwauth), żeby SSH na hasło działał od pierwszego boota.
+# Katalog snippetów na węźle PVE i storage ze Snippets (domyślnie local):
+# CLOUDINIT_SNIPPET_STORAGE="local"
+# CLOUDINIT_SNIPPETS_PATH="/var/lib/vz/snippets"
 
 # Domyślne rozmiary (gdy nie podasz -d / -r)
 DISK_GB_DEFAULT="40"

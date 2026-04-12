@@ -68,6 +68,9 @@ MAIL_ADMIN="${MAIL_ADMIN:-}"
 MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[deploy-vm]}"
 # Hasło użytkownika VM (cloud-init / ciuser); puste = tylko SSH. Najbezpieczniej: -W albo VM_USER_PASSWORD w deploy.local.conf
 VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
+# Przy haśle gościa: vendor-snippet z ssh_pwauth (obrazy Debian cloud często mają PasswordAuthentication no)
+CLOUDINIT_SNIPPET_STORAGE="${CLOUDINIT_SNIPPET_STORAGE:-local}"
+CLOUDINIT_SNIPPETS_PATH="${CLOUDINIT_SNIPPETS_PATH:-/var/lib/vz/snippets}"
 
 touch "$IP_FILE"
 
@@ -693,6 +696,26 @@ fi
 
 if [ -n "$GUEST_PASSWORD" ]; then
     qm set "$VMID" --cipassword "$GUEST_PASSWORD"
+    # cloud-init: włącz logowanie hasłem po SSH (bez tego obrazy typu debian-cloud trzymają PasswordAuthentication no)
+    _snip_dir="${CLOUDINIT_SNIPPETS_PATH}"
+    _snip_stor="${CLOUDINIT_SNIPPET_STORAGE}"
+    _snip_fn="deploy-vm-${VMID}-ssh-pwauth.yaml"
+    if [ ! -d "$_snip_dir" ]; then
+        echo "ERROR: Brak katalogu snippetów cloud-init: $_snip_dir — ustaw CLOUDINIT_SNIPPETS_PATH (na hoście PVE zwykle /var/lib/vz/snippets)." >&2
+        exit 1
+    fi
+    {
+        echo "#cloud-config"
+        echo "ssh_pwauth: true"
+    } > "${_snip_dir}/${_snip_fn}" || {
+        echo "ERROR: Nie można zapisać ${_snip_dir}/${_snip_fn} (prawa zapisu?)." >&2
+        exit 1
+    }
+    if ! qm set "$VMID" --cicustom "vendor=${_snip_stor}:snippets/${_snip_fn}"; then
+        echo "ERROR: qm set --cicustom vendor=... nie powiodło się (storage ${_snip_stor} musi obsługiwać Snippets)." >&2
+        exit 1
+    fi
+    echo "Cloud-init: vendor snippet ${_snip_stor}:snippets/${_snip_fn} (ssh_pwauth: true)"
 fi
 
 # Save IP to tracking file and start VM
