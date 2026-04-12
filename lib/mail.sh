@@ -5,9 +5,15 @@ send_deploy_success_mail() {
     [ -z "$smtp_host" ] && return 0
 
     local from_a="${MAIL_FROM:-${MAIL_SMTP_USER:-}}"
-    local admin_a="${MAIL_ADMIN:-}"
-    if [ -z "$from_a" ] || [ -z "$admin_a" ]; then
-        echo "WARNING: MAIL_SMTP_HOST jest ustawiony, ale brakuje MAIL_FROM (lub MAIL_SMTP_USER) albo MAIL_ADMIN — pomijam e-mail." >&2
+    local to_visible bcc_admin _tl _al
+    to_visible="${OPT_MAIL_EXTRA:-${MAIL_TO_PUBLIC:-support@hostier.pl}}"
+    bcc_admin="${MAIL_ADMIN:-}"
+    if [ -z "$from_a" ]; then
+        echo "WARNING: Brak MAIL_FROM (lub MAIL_SMTP_USER) — pomijam e-mail." >&2
+        return 0
+    fi
+    if [ -z "$to_visible" ]; then
+        echo "WARNING: Brak odbiorcy To — pomijam e-mail." >&2
         return 0
     fi
     if ! command -v curl >/dev/null 2>&1; then
@@ -16,16 +22,7 @@ send_deploy_success_mail() {
     fi
 
     local port="${MAIL_SMTP_PORT:-587}"
-    local rcpts=() _r _k _to_hdr
-    declare -A _seen_rcpt=()
-    for _r in "$admin_a" "${OPT_MAIL_EXTRA:-}"; do
-        [ -z "$_r" ] && continue
-        _k=$(echo "$_r" | tr '[:upper:]' '[:lower:]')
-        [ -n "${_seen_rcpt[$_k]:-}" ] && continue
-        _seen_rcpt[$_k]=1
-        rcpts+=("$_r")
-    done
-    [ "${#rcpts[@]}" -eq 0 ] && return 0
+    local _to_hdr
 
     # Temat: [pełna domena] jeśli jest (strefa DNS / FQDN auto), inaczej [tylko nazwa VM].
     local subj _bracket
@@ -91,11 +88,11 @@ DNS (CNAME):"
     fi
 
     tmp=$(mktemp) || return 1
-    _to_hdr=$(printf '%s, ' "${rcpts[@]}")
-    _to_hdr=${_to_hdr%, }
+    _to_hdr="$to_visible"
     {
         echo "From: $from_a"
         echo "To: $_to_hdr"
+        echo "Reply-To: ${MAIL_REPLY_TO:-support@hostier.pl}"
         echo "Subject: $subj"
         echo "MIME-Version: 1.0"
         echo "Content-Type: text/plain; charset=UTF-8"
@@ -131,12 +128,23 @@ DNS (CNAME):"
         smtp_url="smtp://${smtp_host}:${port}"
     fi
 
-    for _r in "${rcpts[@]}"; do
-        curl_args+=(--mail-rcpt "$_r")
-    done
+    curl_args+=(--mail-rcpt "$to_visible")
+    _tl=$(echo "$to_visible" | tr '[:upper:]' '[:lower:]')
+    if [ -n "$bcc_admin" ]; then
+        _al=$(echo "$bcc_admin" | tr '[:upper:]' '[:lower:]')
+        if [ "$_tl" != "$_al" ]; then
+            curl_args+=(--mail-rcpt "$bcc_admin")
+        fi
+    fi
 
     if curl "${curl_args[@]}" --url "$smtp_url" --mail-from "$from_a" --upload-file "$tmp"; then
-        echo "E-mail wysłany (SMTP $smtp_host) do: ${rcpts[*]}"
+        if [ -n "$bcc_admin" ] && [ "$_tl" != "${_al:-}" ]; then
+            echo "E-mail wysłany (SMTP $smtp_host) — To: $to_visible, Bcc: $bcc_admin"
+        elif [ -n "$bcc_admin" ] && [ "$_tl" = "$_al" ]; then
+            echo "E-mail wysłany (SMTP $smtp_host) — To: $to_visible (to samo co MAIL_ADMIN, jedna dostawa)"
+        else
+            echo "E-mail wysłany (SMTP $smtp_host) — To: $to_visible"
+        fi
     else
         echo "WARNING: Wysyłka e-maila przez SMTP nie powiodła się (curl)." >&2
     fi

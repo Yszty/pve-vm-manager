@@ -50,7 +50,12 @@ MAIL_SMTP_INSECURE="${MAIL_SMTP_INSECURE:-false}"
 MAIL_SMTP_AUTH="${MAIL_SMTP_AUTH:-}"
 MAIL_SMTP_DEBUG="${MAIL_SMTP_DEBUG:-false}"
 MAIL_FROM="${MAIL_FROM:-}"
+# Kopia ukryta dla administratora (Bcc); puste = brak kopii.
 MAIL_ADMIN="${MAIL_ADMIN:-}"
+# Widoczny odbiorca To, gdy brak -e (dodatkowy e-mail); -e nadpisuje.
+MAIL_TO_PUBLIC="${MAIL_TO_PUBLIC:-support@hostier.pl}"
+# Nagłówek Reply-To (odpowiedzi od klienta).
+MAIL_REPLY_TO="${MAIL_REPLY_TO:-support@hostier.pl}"
 # Opcjonalny pełny temat maila po deployu; pusty = domyślny [VM.strefa] Instalacja serwera VPS (patrz lib/mail.sh).
 MAIL_SUBJECT="${MAIL_SUBJECT:-}"
 
