@@ -63,7 +63,7 @@ MAIL_SMTP_DEBUG="${MAIL_SMTP_DEBUG:-false}"
 MAIL_FROM="${MAIL_FROM:-}"
 MAIL_ADMIN="${MAIL_ADMIN:-}"
 MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[deploy-vm]}"
-# Hasło użytkownika gościa (cloud-init / ciuser); puste = tylko SSH. Najbezpieczniej: -W albo VM_USER_PASSWORD w deploy.local.conf
+# Hasło użytkownika VM (cloud-init / ciuser); puste = tylko SSH. Najbezpieczniej: -W albo VM_USER_PASSWORD w deploy.local.conf
 VM_USER_PASSWORD="${VM_USER_PASSWORD:-}"
 
 touch "$IP_FILE"
@@ -459,9 +459,9 @@ done
 if [ "$CLI_VM_PASSWORD_PROMPT" = true ]; then
     CLI_VM_PASSWORD=""
     if [ -r /dev/tty ]; then
-        read -r -s -p "Hasło użytkownika gościa ($USER): " CLI_VM_PASSWORD </dev/tty || true
+        read -r -s -p "Hasło użytkownika VM ($USER): " CLI_VM_PASSWORD </dev/tty || true
     else
-        read -r -s -p "Hasło użytkownika gościa ($USER): " CLI_VM_PASSWORD || true
+        read -r -s -p "Hasło użytkownika VM ($USER): " CLI_VM_PASSWORD || true
     fi
     echo "" >&2
 elif [ "$CLI_VM_PASSWORD_STDIN" = true ]; then
