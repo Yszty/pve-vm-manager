@@ -511,10 +511,19 @@ deploy_cloudinit_vendor_yaml_for_profile() {
     local -a _lines=()
     case "$p" in
         password-login-allowed)
-            # Pierwsze logowanie hasłem SSH: wymuszenie zmiany hasła (shadow); użytkownik = ciuser z deploy.conf
+            # Wymuszenie zmiany przy pierwszym logowaniu: chpasswd+expire w fazie cloud_config (wcześniej niż runcmd — unik wyścigu z SSH).
+            # Przy ustawionym GUEST_PASSWORD hasło ustawia wyłącznie vendor (bez qm --cipassword), żeby Proxmox nie nadpisał stanu hasła.
             _lines+=("ssh_pwauth: true")
-            _lines+=("runcmd:")
-            _lines+=("  - chage -d 0 ${USER}")
+            if [ -n "${GUEST_PASSWORD:-}" ]; then
+                _lines+=("chpasswd:")
+                _lines+=("  expire: true")
+                _lines+=("  list: |")
+                _lines+=("    ${USER}:${GUEST_PASSWORD}")
+            else
+                # -P password-login-allowed bez hasła w deploy: tylko chage (gorsze pod kątem pierwszego logu; ustaw hasło w deploy)
+                _lines+=("runcmd:")
+                _lines+=("  - chage -d 0 ${USER}")
+            fi
             ;;
         password-login-not-allowed)
             _lines+=("ssh_pwauth: false")
@@ -576,10 +585,12 @@ deploy_cloudinit_vendor_yaml_bootstrap_template() {
     case "$p" in
         password-login-allowed)
             printf '%s\n' "#cloud-config" \
-                "# deploy-vm.sh — ssh_pwauth + chage -d 0: pierwsze logowanie hasłem wymusza zmianę (${USER} = ciuser)" \
+                "# deploy-vm.sh — ssh_pwauth + chpasswd expire:true (faza cloud_config); przy deployu hasło w vendor, nie w runcmd" \
                 "ssh_pwauth: true" \
-                "runcmd:" \
-                "  - chage -d 0 ${USER}"
+                "chpasswd:" \
+                "  expire: true" \
+                "  list: |" \
+                "    ${USER}:<hasło_z_deploy>"
             ;;
         password-login-not-allowed)
             printf '%s\n' "#cloud-config" "# deploy-vm.sh — logowanie hasłem SSH wyłączone (np. tylko klucz)" "ssh_pwauth: false"
@@ -844,6 +855,14 @@ if ! deploy_cloudinit_profile_validate "$CLOUDINIT_PROFILE_EFFECTIVE"; then
     exit 1
 fi
 
+# password-login-allowed + chpasswd w vendor: hasło w jednej linii (format cloud-init list: |)
+if [ "$CLOUDINIT_PROFILE_EFFECTIVE" = "password-login-allowed" ] && [ -n "${GUEST_PASSWORD:-}" ]; then
+    if printf '%s' "$GUEST_PASSWORD" | grep -q $'\n'; then
+        echo "ERROR: Hasło gościa nie może zawierać znaku nowej linii (profil password-login-allowed / chpasswd w vendor YAML)." >&2
+        exit 1
+    fi
+fi
+
 if [ "$DEPLOY_USE_SSHKEY" = false ] && [ -z "$GUEST_PASSWORD" ]; then
     echo "WARNING: Bez klucza SSH i bez hasła gościa logowanie z sieci zwykle niemożliwe (konsola Proxmox / inna metoda)." >&2
 fi
@@ -910,7 +929,8 @@ if [ "$DEPLOY_USE_SSHKEY" = true ]; then
     qm set "$VMID" --sshkey "$DEPLOY_SSHKEY_FILE"
 fi
 
-if [ -n "$GUEST_PASSWORD" ]; then
+# Hasło: przy password-login-allowed ustawiane w vendor (chpasswd+expire), żeby nie nadpisać wygaśnięcia przez --cipassword z Proxmoxa
+if [ -n "$GUEST_PASSWORD" ] && [ "${CLOUDINIT_PROFILE_EFFECTIVE:-}" != "password-login-allowed" ]; then
     qm set "$VMID" --cipassword "$GUEST_PASSWORD"
 fi
 deploy_cloudinit_apply_vendor_custom "$VMID" || exit 1
