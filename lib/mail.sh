@@ -28,23 +28,41 @@ send_deploy_success_mail() {
     [ "${#rcpts[@]}" -eq 0 ] && return 0
 
     local subj="${MAIL_SUBJECT_PREFIX} VM $VM_NAME ($VMID) — $GUEST_IP"
-    local body tmp
+    local body tmp _t _canon _www_fqdn
+
     body="Wdrożenie zakończone pomyślnie.
 
-Węzeł:    $(hostname 2>/dev/null || echo '?')
 VM:       $VM_NAME
-VMID:     $VMID
 IP:       $GUEST_IP${MASK}
 Dysk:     ${DISK_SIZE}G
 RAM:      ${RAM_SIZE}GB
 "
-    if [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ]; then
+    if [ -n "${GUEST_PASSWORD:-}" ]; then
+        body="${body}Hasło:    ${GUEST_PASSWORD}
+"
+    fi
+
+    if [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ]; then
+        if [ "$SKIP_OVH_DNS" = true ]; then
+            body="${body}
+Uwaga: OVH pominięty (-D) — poniżej skonfigurowane FQDN (bez zapisu w API)."
+        fi
         body="${body}
 DNS (A):"
         for _t in "${OVH_DNS_TARGETS[@]}"; do
             body="${body}
   ${_t} -> $GUEST_IP"
         done
+        if [ "$SKIP_OVH_DNS" = false ] && ovh_dns_www_cname_enabled; then
+            body="${body}
+DNS (CNAME):"
+            for _t in "${OVH_DNS_TARGETS[@]}"; do
+                _canon=$(printf '%s' "${_t%.}" | tr '[:upper:]' '[:lower:]')
+                _www_fqdn="www.${_canon}"
+                body="${body}
+  ${_www_fqdn} -> ${_canon}"
+            done
+        fi
     fi
 
     tmp=$(mktemp) || return 1
