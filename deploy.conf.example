@@ -30,6 +30,7 @@ IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 # Cloud-init vendor (qm --cicustom vendor=…): profil deployu → plik <profil>.yml w katalogu Snippets.
 # Tryb auto (puste CLOUDINIT_DEPLOY_PROFILE): no-ssh-key-deploy | password-and-ssh-deploy | ssh-key-only | standard
 # Nadpisanie: CLOUDINIT_DEPLOY_PROFILE lub ./deploy-vm.sh -P profil
+# Lista profili + utworzenie brakujących plików .yml w Snippets: ./deploy-vm.sh -C
 # CLOUDINIT_DEPLOY_PROFILE=""
 # CLOUDINIT_CUSTOM_SNIPPET_STORAGE="local"
 # CLOUDINIT_CUSTOM_SNIPPETS_PATH="/var/lib/vz/snippets"

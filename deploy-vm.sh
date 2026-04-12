@@ -41,7 +41,7 @@ OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
 OVH_DNS_WWW_CNAME="${OVH_DNS_WWW_CNAME:-true}"
 # OVH_DNS_AUTO_ZONE / VM_NAME_PREFIX / VM_NAME — deploy.conf; pierwszy rekord A = NAME.strefa (domyślnie NAME = VM_NAME_PREFIX+VMID).
 # OVH_DNS_FQDN / OVH_DNS_FQDNS — opcjonalny drugi (i kolejne) rekord(y). -f nadpisuje tylko opcjonalne.
-# DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p. Hasło: VM_USER_PASSWORD / -W / -w -. Cloud-init profil: CLOUDINIT_DEPLOY_PROFILE / -P
+# DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p. Hasło: VM_USER_PASSWORD / -W / -w -. Cloud-init: CLOUDINIT_DEPLOY_PROFILE / -P / -C
 SKIP_OVH_DNS=false
 CLI_NAME=""
 CLI_FQDN=""
@@ -53,6 +53,7 @@ CLI_VM_PASSWORD_STDIN=false
 CLI_VM_PASSWORD_PROMPT=false
 CLI_SKIP_SSHKEY=false
 CLI_DEPLOY_PROFILE=""
+CLI_CLOUDINIT_PROFILES_BOOTSTRAP=false
 
 # SMTP (deploy.conf): MAIL_SMTP_HOST puste = bez e-maila po wdrożeniu
 MAIL_SMTP_HOST="${MAIL_SMTP_HOST:-}"
@@ -414,6 +415,60 @@ deploy_cloudinit_apply_vendor_custom() {
     return 0
 }
 
+# Lista znanych profili vendor (zgodna z deploy_cloudinit_effective_profile / case w vendor_yaml)
+deploy_cloudinit_known_profiles() {
+    echo "no-ssh-key-deploy"
+    echo "password-and-ssh-deploy"
+    echo "ssh-key-only"
+    echo "standard"
+}
+
+# Szablon pliku <profil>.yml na dysku (inicjalizacja); runtime nadal generuje YAML z deploy_cloudinit_vendor_yaml_for_profile
+deploy_cloudinit_vendor_yaml_bootstrap_template() {
+    local p="$1"
+    case "$p" in
+        no-ssh-key-deploy | password-and-ssh-deploy)
+            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ${p}: typowo ssh_pwauth przy logowaniu hasłem" "ssh_pwauth: true"
+            ;;
+        ssh-key-only)
+            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ssh-key-only: zwykle bez wpisów (tylko klucz SSH)"
+            ;;
+        standard)
+            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil standard: przy deployu z hasłem skrypt ustawia ssh_pwauth: true"
+            ;;
+        *)
+            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ${p}"
+            ;;
+    esac
+}
+
+# -C: wypisz profile, utwórz brakujące pliki .yml w katalogu Snippets
+deploy_cloudinit_profiles_bootstrap() {
+    local _dir _p _fn _path
+    _dir=$(deploy_cloudinit_resolve_snippets_dir) || {
+        echo "ERROR: Brak katalogu Snippets (CLOUDINIT_CUSTOM_SNIPPETS_PATH): ${CLOUDINIT_CUSTOM_SNIPPETS_PATH}" >&2
+        return 1
+    }
+    echo "Cloud-init vendor — katalog Snippets: ${_dir}"
+    echo "Profile (pliki: <profil>.yml):"
+    while IFS= read -r _p; do
+        [ -z "$_p" ] && continue
+        _fn="${_p}.yml"
+        _path="${_dir}/${_fn}"
+        if [ -f "$_path" ]; then
+            echo "  ${_p}  →  ${_fn}  (już istnieje)"
+        else
+            echo "  ${_p}  →  ${_fn}  (tworzę)"
+            deploy_cloudinit_vendor_yaml_bootstrap_template "$_p" > "$_path" || {
+                echo "ERROR: Nie można zapisać ${_path}" >&2
+                return 1
+            }
+        fi
+    done < <(deploy_cloudinit_known_profiles)
+    echo "Gotowe. Edytuj szablony w ${_dir} lub dopisz wpisy w deploy_cloudinit_vendor_yaml_for_profile w deploy-vm.sh."
+    return 0
+}
+
 # Powiadomienie po udanym wdrożeniu (wymaga curl; MAIL_SMTP_HOST + MAIL_FROM + MAIL_ADMIN)
 deploy_send_success_mail() {
     local smtp_host="${MAIL_SMTP_HOST:-}"
@@ -524,7 +579,7 @@ DNS (A):"
 AUTO_CONFIRM=false
 
 usage() {
-    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-W] [-w PASS|-] [-e EMAIL] [-P PROFILE] [-D]"
+    echo "Usage: $0 [-n NAME] [-d DISK_GB] [-r RAM_GB] [-y] [-f FQDN] [-i VMID] [-p IP] [-W] [-w PASS|-] [-e EMAIL] [-P PROFILE] [-C] [-D]"
     echo "  -n  Nazwa VM (nadpisuje domyślną: VM_NAME_PREFIX+VMID i pierwszy rekord DNS). Env / deploy.conf: VM_NAME"
     echo "  -d  Disk size in GB (default: $DISK_GB_DEFAULT)"
     echo "  -r  RAM size in GB (default: $RAM_GB_DEFAULT)"
@@ -538,11 +593,12 @@ usage() {
     echo "  -e  Dodatkowy adres e-mail (poza MAIL_ADMIN); powiadomienie SMTP z deploy.conf"
     echo "  -K  Bez klucza SSH w cloud-init (--sshkey); w deploy.conf: SKIP_SSHKEY=true"
     echo "  -P  Profil cloud-init vendor (cicustom); nadpisuje CLOUDINIT_DEPLOY_PROFILE i tryb auto"
+    echo "  -C  Wypisz znane profile vendor i utwórz brakujące pliki .yml w katalogu Snippets; kończy skrypt"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
 }
 
-while getopts "n:d:r:yf:i:p:w:We:DKP:" opt; do
+while getopts "n:d:r:yf:i:p:w:We:DKP:C" opt; do
     case $opt in
         n) CLI_NAME=$OPTARG ;;
         d) DISK_SIZE=$OPTARG ;;
@@ -563,10 +619,16 @@ while getopts "n:d:r:yf:i:p:w:We:DKP:" opt; do
         e) CLI_MAIL_EXTRA=$OPTARG ;;
         K) CLI_SKIP_SSHKEY=true ;;
         P) CLI_DEPLOY_PROFILE=$OPTARG ;;
+        C) CLI_CLOUDINIT_PROFILES_BOOTSTRAP=true ;;
         D) SKIP_OVH_DNS=true ;;
         *) usage ;;
     esac
 done
+
+if [ "$CLI_CLOUDINIT_PROFILES_BOOTSTRAP" = true ]; then
+    deploy_cloudinit_profiles_bootstrap || exit 1
+    exit 0
+fi
 
 # Klucz SSH w cloud-init: domyślnie tak; wyłączenie: SKIP_SSHKEY w deploy.conf (true/1/yes) lub -K
 DEPLOY_USE_SSHKEY=true
