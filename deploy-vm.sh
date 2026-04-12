@@ -229,6 +229,56 @@ ovh_resolve_fqdn() {
     return 1
 }
 
+# Etykieta subdomeny OVH (np. "www" lub "a.b") — ta sama reguła co przy walidacji rekordu A
+ovh_dns_label_ok() {
+    [[ "$1" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]
+}
+
+ovh_dns_www_cname_enabled() {
+    case "${OVH_DNS_WWW_CNAME,,}" in
+        false | 0 | no) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# Jeden FQDN ze stref: rekord A, potem opcjonalnie www -> CNAME
+ovh_dns_apply_records_for_fqdn() {
+    local fqdn="$1" zones_txt="$2" ip="$3"
+    local resolved z sd canon canon_lc www_sd
+
+    resolved=$(ovh_resolve_fqdn "$fqdn" "$zones_txt") || resolved=""
+    if [ -z "$resolved" ]; then
+        echo "WARNING: FQDN '$fqdn' nie pasuje do żadnej strefy DNS na tym koncie OVH — pomijam ten rekord." >&2
+        return 0
+    fi
+    z=$(printf '%s\n' "$resolved" | sed -n '1p')
+    sd=$(printf '%s\n' "$resolved" | sed -n '2p')
+
+    if [ -n "$sd" ] && ! ovh_dns_label_ok "$sd"; then
+        echo "WARNING: Odrzucono subdomenę '$sd' (nieprawidłowa etykieta) dla '$fqdn'." >&2
+        return 0
+    fi
+
+    if ! ovh_dns_set_a "$z" "$sd" "$ip"; then
+        return 0
+    fi
+
+    ovh_dns_www_cname_enabled || return 0
+
+    canon="${fqdn%.}"
+    canon_lc=$(echo "$canon" | tr '[:upper:]' '[:lower:]')
+    if [ -n "$sd" ]; then
+        www_sd="www.${sd}"
+    else
+        www_sd="www"
+    fi
+    if ! ovh_dns_label_ok "$www_sd"; then
+        echo "WARNING: Pomijam CNAME www dla '$fqdn' (nieprawidłowa etykieta '$www_sd')." >&2
+        return 0
+    fi
+    ovh_dns_set_cname "$z" "$www_sd" "${canon_lc}." || true
+}
+
 # =========================
 # FLAGS HANDLING
 # =========================
@@ -403,7 +453,7 @@ echo "RAM:      ${RAM_MB}MB (${RAM_SIZE}GB)"
 if [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ]; then
     for _t in "${OVH_DNS_TARGETS[@]}"; do
         echo "OVH DNS:  ${_t} -> $IP (A)"
-        if [ "${OVH_DNS_WWW_CNAME,,}" != "false" ] && [ "${OVH_DNS_WWW_CNAME,,}" != "0" ] && [ "${OVH_DNS_WWW_CNAME,,}" != "no" ]; then
+        if ovh_dns_www_cname_enabled; then
             echo "OVH DNS:  www.${_t} -> CNAME ${_t}."
         fi
     done
@@ -453,34 +503,7 @@ if [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ] \
         echo "WARNING: Nie udało się pobrać listy stref OVH (/domain/zone) — pomijam DNS." >&2
     else
         for _fqdn in "${OVH_DNS_TARGETS[@]}"; do
-            _resolved=$(ovh_resolve_fqdn "$_fqdn" "$_zones_sorted") || _resolved=""
-            if [ -z "$_resolved" ]; then
-                echo "WARNING: FQDN '$_fqdn' nie pasuje do żadnej strefy DNS na tym koncie OVH — pomijam ten rekord." >&2
-                continue
-            fi
-            _z=$(echo "$_resolved" | sed -n '1p')
-            _sd=$(echo "$_resolved" | sed -n '2p')
-            if [ -n "$_sd" ] && [[ ! "$_sd" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
-                echo "WARNING: Odrzucono subdomenę '$_sd' (nieprawidłowa etykieta) dla '$_fqdn'." >&2
-                continue
-            fi
-            if ovh_dns_set_a "$_z" "$_sd" "$IP"; then
-                if [ "${OVH_DNS_WWW_CNAME,,}" != "false" ] && [ "${OVH_DNS_WWW_CNAME,,}" != "0" ] && [ "${OVH_DNS_WWW_CNAME,,}" != "no" ]; then
-                    _canon="${_fqdn%.}"
-                    _canon_lc=$(echo "$_canon" | tr '[:upper:]' '[:lower:]')
-                    if [ -n "$_sd" ]; then
-                        _www_sd="www.${_sd}"
-                    else
-                        _www_sd="www"
-                    fi
-                    if [[ ! "$_www_sd" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
-                        echo "WARNING: Pomijam CNAME www dla '$_fqdn' (nieprawidłowa etykieta '$_www_sd')." >&2
-                    else
-                        _cname_target="${_canon_lc}."
-                        ovh_dns_set_cname "$_z" "$_www_sd" "$_cname_target" || true
-                    fi
-                fi
-            fi
+            ovh_dns_apply_records_for_fqdn "$_fqdn" "$_zones_sorted" "$IP"
         done
     fi
 elif [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ]; then
