@@ -39,6 +39,6 @@ OVH_DNS_FQDN=""
 # Albo kilka dodatkowych FQDN (zamiast pojedynczego OVH_DNS_FQDN):
 # OVH_DNS_FQDNS=( "vm1.hostier.pl" "backup.inna-domena.pl" )
 
-# Opcjonalnie: stałe VMID / IP (nadpisują -i / -p)
+# Opcjonalnie: stałe VMID / IP (nadpisują -i / -p). Bez tego: losowy VMID 1###### (1 + 6 cyfr).
 # DEPLOY_VMID=""
 # DEPLOY_IP=""

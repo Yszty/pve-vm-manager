@@ -192,7 +192,7 @@ usage() {
     echo "  -r  RAM size in GB (default: $RAM_GB_DEFAULT)"
     echo "  -y  Auto-confirm (non-interactive mode)"
     echo "  -f  OVH DNS: opcjonalny dodatkowy FQDN (drugi rekord); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS z deploy.conf (pierwszy rekord: zawsze serwer1+6cyfr.strefa)"
-    echo "  -i  Proxmox VMID (manual); default: auto (max existing < 90000 + 10). Env: DEPLOY_VMID"
+    echo "  -i  Proxmox VMID (manual); default: losowy 1###### (cyfra 1 + 6 losowych cyfr). Env: DEPLOY_VMID"
     echo "  -p  Guest IPv4 (manual); default: next free from $IP_FILE under $IP_PREFIX.x. Env: DEPLOY_IP"
     echo "  -D  Skip OVH DNS API for this run"
     exit 1
@@ -303,15 +303,26 @@ RAM_MB=$((RAM_SIZE * 1024))
 # =========================
 # FIND VMID
 # =========================
-# Priorytet: -i > DEPLOY_VMID (env) > auto: najwyższy VMID < 90000 + 10
+# Priorytet: -i > DEPLOY_VMID (env) > auto: losowy 1 + 6 cyfr (1000000–1999999), aż trafisz wolny ID
 if [ -n "$CLI_VMID" ]; then
     VMID=$CLI_VMID
 elif [ -n "${DEPLOY_VMID:-}" ]; then
     VMID=$DEPLOY_VMID
 else
-    VMID=$(qm list | awk 'NR>1 && $1 < 90000 {print $1}' | sort -n | tail -1)
-    [ -z "$VMID" ] && VMID=1000
-    VMID=$((VMID + 10))
+    _vm_try=0
+    _vm_max=80
+    while [ "$_vm_try" -lt "$_vm_max" ]; do
+        _vm_six=$(command -v shuf >/dev/null 2>&1 && shuf -i 0-999999 -n 1 || awk 'BEGIN{srand(); print int(rand() * 1000000)}')
+        VMID=$((1000000 + _vm_six))
+        if ! qm config "$VMID" &>/dev/null; then
+            break
+        fi
+        _vm_try=$((_vm_try + 1))
+    done
+    if [ "$_vm_try" -ge "$_vm_max" ]; then
+        echo "ERROR: Nie udało się wylosować wolnego VMID (zakres 1######) po $_vm_max próbach." >&2
+        exit 1
+    fi
 fi
 
 if [ -n "$CLI_VMID" ] || [ -n "${DEPLOY_VMID:-}" ]; then
