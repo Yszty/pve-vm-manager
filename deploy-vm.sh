@@ -511,7 +511,10 @@ deploy_cloudinit_vendor_yaml_for_profile() {
     local -a _lines=()
     case "$p" in
         password-login-allowed)
+            # Pierwsze logowanie hasłem SSH: wymuszenie zmiany hasła (shadow); użytkownik = ciuser z deploy.conf
             _lines+=("ssh_pwauth: true")
+            _lines+=("runcmd:")
+            _lines+=("  - chage -d 0 ${USER}")
             ;;
         password-login-not-allowed)
             _lines+=("ssh_pwauth: false")
@@ -572,7 +575,11 @@ deploy_cloudinit_vendor_yaml_bootstrap_template() {
     local p="$1"
     case "$p" in
         password-login-allowed)
-            printf '%s\n' "#cloud-config" "# deploy-vm.sh — logowanie hasłem SSH włączone (ssh_pwauth)" "ssh_pwauth: true"
+            printf '%s\n' "#cloud-config" \
+                "# deploy-vm.sh — ssh_pwauth + chage -d 0: pierwsze logowanie hasłem wymusza zmianę (${USER} = ciuser)" \
+                "ssh_pwauth: true" \
+                "runcmd:" \
+                "  - chage -d 0 ${USER}"
             ;;
         password-login-not-allowed)
             printf '%s\n' "#cloud-config" "# deploy-vm.sh — logowanie hasłem SSH wyłączone (np. tylko klucz)" "ssh_pwauth: false"
