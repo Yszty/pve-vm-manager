@@ -28,11 +28,15 @@ OVH_CONSUMER_KEY=""
 OVH_ENDPOINT="https://eu.api.ovh.com"
 OVH_DNS_TTL="3600"
 
-# Pełna nazwa rekordu A (FQDN) — skrypt sam dopasuje strefę i subdomenę do API OVH.
-# Przykład apex (rekord @): wpisz samą domenę strefy, np. "hostier.pl"
-OVH_DNS_FQDN="vm1.hostier.pl"
+# Pierwszy rekord A — zawsze (gdy DNS włączony, bez -D): PREFIX + 6 losowych cyfr + .STREFA
+# Np. serwer1847392.hostier.pl
+OVH_DNS_AUTO_PREFIX="serwer1"
+OVH_DNS_AUTO_ZONE="hostier.pl"
 
-# Opcjonalnie wiele rekordów A (ta sama maszyna / ten sam IP) — zamiast OVH_DNS_FQDN:
+# Drugi rekord (opcjonalny) — ten sam IP; puste = tylko rekord auto powyżej
+OVH_DNS_FQDN=""
+
+# Albo kilka dodatkowych FQDN (zamiast pojedynczego OVH_DNS_FQDN):
 # OVH_DNS_FQDNS=( "vm1.hostier.pl" "backup.inna-domena.pl" )
 
 # Opcjonalnie: stałe VMID / IP (nadpisują -i / -p)

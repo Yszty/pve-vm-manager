@@ -29,7 +29,8 @@ OVH_APPLICATION_SECRET="${OVH_APPLICATION_SECRET:-}"
 OVH_CONSUMER_KEY="${OVH_CONSUMER_KEY:-}"
 OVH_ENDPOINT="${OVH_ENDPOINT:-https://eu.api.ovh.com}"
 OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
-# OVH_DNS_FQDN / OVH_DNS_FQDNS — deploy.conf; pełna nazwa rekordu (np. vm1.domena.pl lub domena.pl dla @). Rozdzielenie zone/sub przez API.
+# OVH_DNS_AUTO_* — deploy.conf; zawsze pierwszy rekord A (prefix + 6 cyfr + strefa).
+# OVH_DNS_FQDN / OVH_DNS_FQDNS — opcjonalny drugi (i kolejne) rekord(y). -f nadpisuje tylko opcjonalne.
 # DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p
 SKIP_OVH_DNS=false
 CLI_FQDN=""
@@ -190,7 +191,7 @@ usage() {
     echo "  -d  Disk size in GB (default: $DISK_GB_DEFAULT)"
     echo "  -r  RAM size in GB (default: $RAM_GB_DEFAULT)"
     echo "  -y  Auto-confirm (non-interactive mode)"
-    echo "  -f  OVH DNS: pełna nazwa rekordu (np. vm1.example.com lub example.com dla @); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS z deploy.conf"
+    echo "  -f  OVH DNS: opcjonalny dodatkowy FQDN (drugi rekord); nadpisuje OVH_DNS_FQDN / OVH_DNS_FQDNS z deploy.conf (pierwszy rekord: zawsze serwer1+6cyfr.strefa)"
     echo "  -i  Proxmox VMID (manual); default: auto (max existing < 90000 + 10). Env: DEPLOY_VMID"
     echo "  -p  Guest IPv4 (manual); default: next free from $IP_FILE under $IP_PREFIX.x. Env: DEPLOY_IP"
     echo "  -D  Skip OVH DNS API for this run"
@@ -264,15 +265,30 @@ if [[ ! "$NAME" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
     exit 1
 fi
 
-# Cele rekordów A (FQDN): -f > tablica OVH_DNS_FQDNS > pojedynczy OVH_DNS_FQDN (deploy.conf)
-OVH_DNS_TARGETS=()
+# Rekordy A: (1) zawsze serwer1+6cyfr.strefa gdy DNS włączony; (2) opcjonalnie: -f > OVH_DNS_FQDNS > OVH_DNS_FQDN
+OVH_DNS_OPTIONAL=()
 if [ -n "$CLI_FQDN" ]; then
-    OVH_DNS_TARGETS=("$CLI_FQDN")
+    OVH_DNS_OPTIONAL=("$CLI_FQDN")
 elif [ -n "${OVH_DNS_FQDNS+x}" ] && [ "${#OVH_DNS_FQDNS[@]}" -gt 0 ]; then
-    OVH_DNS_TARGETS=("${OVH_DNS_FQDNS[@]}")
+    OVH_DNS_OPTIONAL=("${OVH_DNS_FQDNS[@]}")
 elif [ -n "${OVH_DNS_FQDN:-}" ]; then
-    OVH_DNS_TARGETS=("$OVH_DNS_FQDN")
+    OVH_DNS_OPTIONAL=("$OVH_DNS_FQDN")
 fi
+
+OVH_DNS_TARGETS=()
+OVH_DNS_AUTO_FQDN=""
+if [ "$SKIP_OVH_DNS" = false ]; then
+    if [ -z "${OVH_DNS_AUTO_PREFIX:-}" ] || [ -z "${OVH_DNS_AUTO_ZONE:-}" ]; then
+        echo "ERROR: deploy.conf: ustaw OVH_DNS_AUTO_PREFIX i OVH_DNS_AUTO_ZONE (pierwszy, zawsze tworzony rekord A)." >&2
+        exit 1
+    fi
+    _r6=$(command -v shuf >/dev/null 2>&1 && shuf -i 0-999999 -n 1 || awk 'BEGIN{srand(); print int(rand() * 1000000)}')
+    OVH_DNS_AUTO_FQDN="${OVH_DNS_AUTO_PREFIX}$(printf '%06d' "$_r6").${OVH_DNS_AUTO_ZONE}"
+    OVH_DNS_TARGETS+=("$OVH_DNS_AUTO_FQDN")
+fi
+for _o in "${OVH_DNS_OPTIONAL[@]}"; do
+    OVH_DNS_TARGETS+=("$_o")
+done
 
 if [ "$AUTO_CONFIRM" = false ]; then
     read -p "Enter Disk size (GB) [default $DISK_SIZE]: " INPUT_DISK
