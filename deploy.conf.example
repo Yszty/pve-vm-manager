@@ -30,7 +30,7 @@ IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 
 # --- 4. Cloud-init vendor (qm --cicustom vendor=…; logika w deploy-vm.sh: deploy_cloudinit_*) ---
 # Profil → plik <profil>.yml w katalogu Snippets (storage: CLOUDINIT_CUSTOM_SNIPPET_STORAGE).
-# Tryb auto (puste CLOUDINIT_DEPLOY_PROFILE): wybór między profilami jak w tablicy DEPLOY_CLOUDINIT_PROFILES_KNOWN w skrypcie.
+# Tryb auto (puste CLOUDINIT_DEPLOY_PROFILE): hasło gościa ustawione → password-login-allowed; brak hasła → password-login-not-allowed
 # Nadpisanie profilu: CLOUDINIT_DEPLOY_PROFILE lub ./deploy-vm.sh -P profil (CLI_DEPLOY_PROFILE)
 # Lista profili + utworzenie brakujących szablonów .yml: ./deploy-vm.sh -C
 # CLOUDINIT_DEPLOY_PROFILE=""

@@ -457,13 +457,11 @@ DNS (A):"
 # Przy deployu źródłem prawdy jest YAML z deploy_cloudinit_vendor_yaml_for_profile (zapis do katalogu Snippets, potem qm set --cicustom).
 # -C tworzy szablony <profil>.yml na dysku (deploy_cloudinit_vendor_yaml_bootstrap_template); przy kolejnym deployu plik jest nadpisywany generowanym YAML.
 
-# Nowy profil: dopisz ID do DEPLOY_CLOUDINIT_PROFILES_KNOWN oraz logikę w deploy_cloudinit_effective_profile (jeśli tryb auto),
+# Nowy profil: dopisz ID do DEPLOY_CLOUDINIT_PROFILES_KNOWN oraz logikę auto w deploy_cloudinit_effective_profile,
 # case w deploy_cloudinit_vendor_yaml_for_profile i w deploy_cloudinit_vendor_yaml_bootstrap_template.
 DEPLOY_CLOUDINIT_PROFILES_KNOWN=(
-    no-ssh-key-deploy
-    password-and-ssh-deploy
-    ssh-key-only
-    standard
+    password-login-allowed
+    password-login-not-allowed
 )
 
 deploy_cloudinit_profile_validate() {
@@ -475,7 +473,7 @@ deploy_cloudinit_profile_validate() {
     return 0
 }
 
-# Priorytet: -P (CLI_DEPLOY_PROFILE) > CLOUDINIT_DEPLOY_PROFILE > auto wg DEPLOY_USE_SSHKEY / GUEST_PASSWORD (ID jak w DEPLOY_CLOUDINIT_PROFILES_KNOWN)
+# Priorytet: -P (CLI_DEPLOY_PROFILE) > CLOUDINIT_DEPLOY_PROFILE > auto: hasło gościa ustawione → password-login-allowed, w przeciwnym razie password-login-not-allowed
 deploy_cloudinit_effective_profile() {
     if [ -n "${CLI_DEPLOY_PROFILE:-}" ]; then
         printf '%s\n' "$CLI_DEPLOY_PROFILE"
@@ -485,14 +483,10 @@ deploy_cloudinit_effective_profile() {
         printf '%s\n' "$CLOUDINIT_DEPLOY_PROFILE"
         return 0
     fi
-    if [ "$DEPLOY_USE_SSHKEY" = false ] && [ -n "${GUEST_PASSWORD:-}" ]; then
-        echo "no-ssh-key-deploy"
-    elif [ "$DEPLOY_USE_SSHKEY" = true ] && [ -n "${GUEST_PASSWORD:-}" ]; then
-        echo "password-and-ssh-deploy"
-    elif [ "$DEPLOY_USE_SSHKEY" = true ] && [ -z "${GUEST_PASSWORD:-}" ]; then
-        echo "ssh-key-only"
+    if [ -n "${GUEST_PASSWORD:-}" ]; then
+        echo "password-login-allowed"
     else
-        echo "standard"
+        echo "password-login-not-allowed"
     fi
 }
 
@@ -514,20 +508,19 @@ deploy_cloudinit_vendor_yaml_for_profile() {
     local p="$1"
     local -a _lines=()
     case "$p" in
-        no-ssh-key-deploy)
-            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
+        password-login-allowed)
+            _lines+=("ssh_pwauth: true")
             ;;
-        password-and-ssh-deploy)
-            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
-            ;;
-        ssh-key-only)
-            return 0
-            ;;
-        standard)
-            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
+        password-login-not-allowed)
+            _lines+=("ssh_pwauth: false")
             ;;
         *)
-            [ -n "${GUEST_PASSWORD:-}" ] && _lines+=("ssh_pwauth: true")
+            # Niestandardowa nazwa profilu z -P / deploy.conf: ustaw ssh_pwauth jak przy znanych profilach
+            if [ -n "${GUEST_PASSWORD:-}" ]; then
+                _lines+=("ssh_pwauth: true")
+            else
+                _lines+=("ssh_pwauth: false")
+            fi
             ;;
     esac
     [ "${#_lines[@]}" -eq 0 ] && return 0
@@ -576,14 +569,11 @@ deploy_cloudinit_known_profiles() {
 deploy_cloudinit_vendor_yaml_bootstrap_template() {
     local p="$1"
     case "$p" in
-        no-ssh-key-deploy | password-and-ssh-deploy)
-            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ${p}: typowo ssh_pwauth przy logowaniu hasłem" "ssh_pwauth: true"
+        password-login-allowed)
+            printf '%s\n' "#cloud-config" "# deploy-vm.sh — logowanie hasłem SSH włączone (ssh_pwauth)" "ssh_pwauth: true"
             ;;
-        ssh-key-only)
-            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ssh-key-only: zwykle bez wpisów (tylko klucz SSH)"
-            ;;
-        standard)
-            printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil standard: przy deployu z hasłem skrypt ustawia ssh_pwauth: true"
+        password-login-not-allowed)
+            printf '%s\n' "#cloud-config" "# deploy-vm.sh — logowanie hasłem SSH wyłączone (np. tylko klucz)" "ssh_pwauth: false"
             ;;
         *)
             printf '%s\n' "#cloud-config" "# deploy-vm.sh — profil ${p}"
