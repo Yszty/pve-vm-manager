@@ -29,6 +29,8 @@ OVH_APPLICATION_SECRET="${OVH_APPLICATION_SECRET:-}"
 OVH_CONSUMER_KEY="${OVH_CONSUMER_KEY:-}"
 OVH_ENDPOINT="${OVH_ENDPOINT:-https://eu.api.ovh.com}"
 OVH_DNS_TTL="${OVH_DNS_TTL:-3600}"
+# OVH_DNS_WWW_CNAME — deploy.conf: po każdym A dodaj www.<host> -> CNAME (domyślnie włączone; "false" wyłącza).
+OVH_DNS_WWW_CNAME="${OVH_DNS_WWW_CNAME:-true}"
 # OVH_DNS_AUTO_ZONE / VM_NAME_PREFIX / VM_NAME — deploy.conf; pierwszy rekord A = NAME.strefa (domyślnie NAME = VM_NAME_PREFIX+VMID).
 # OVH_DNS_FQDN / OVH_DNS_FQDNS — opcjonalny drugi (i kolejne) rekord(y). -f nadpisuje tylko opcjonalne.
 # DEPLOY_VMID, DEPLOY_IP — deploy.conf; nadpisania: -i, -p
@@ -132,6 +134,53 @@ ovh_dns_set_a() {
         echo "OVH DNS: A ${sub}.${zone} -> $ip"
     else
         echo "OVH DNS: A @ ${zone} -> $ip"
+    fi
+    return 0
+}
+
+# Rekord CNAME (tworzy lub aktualizuje dla tej subdomeny); target zwykle FQDN z końcową kropką
+ovh_dns_set_cname() {
+    local zone="$1" sub="$2" target="$3"
+    local list_resp list_code ids first_id post_resp post_code put_resp put_code
+    local body_post body_put
+
+    body_post=$(printf '{"fieldType":"CNAME","subDomain":"%s","target":"%s","ttl":%s}' "$sub" "$target" "$OVH_DNS_TTL")
+
+    list_resp=$(ovh_http GET "/domain/zone/${zone}/record?fieldType=CNAME&subDomain=${sub}" "")
+    list_code=$(echo "$list_resp" | tail -n1)
+    list_body=$(echo "$list_resp" | sed '$d')
+    if [ "$list_code" != "200" ]; then
+        echo "WARNING: OVH list CNAME failed HTTP $list_code${list_body:+ — $list_body}" >&2
+        return 1
+    fi
+
+    ids=$(echo "$list_body" | grep -oE '[0-9]+' || true)
+    first_id=$(echo "$ids" | head -n1)
+
+    if [ -n "$first_id" ]; then
+        body_put=$(printf '{"target":"%s","subDomain":"%s","ttl":%s}' "$target" "$sub" "$OVH_DNS_TTL")
+        put_resp=$(ovh_http PUT "/domain/zone/${zone}/record/${first_id}" "$body_put")
+        put_code=$(echo "$put_resp" | tail -n1)
+        put_body=$(echo "$put_resp" | sed '$d')
+        if [ "$put_code" != "200" ]; then
+            echo "WARNING: OVH PUT CNAME failed HTTP $put_code${put_body:+ — $put_body}" >&2
+            return 1
+        fi
+    else
+        post_resp=$(ovh_http POST "/domain/zone/${zone}/record" "$body_post")
+        post_code=$(echo "$post_resp" | tail -n1)
+        post_body=$(echo "$post_resp" | sed '$d')
+        if [ "$post_code" != "200" ] && [ "$post_code" != "201" ]; then
+            echo "WARNING: OVH POST CNAME failed HTTP $post_code${post_body:+ — $post_body}" >&2
+            return 1
+        fi
+    fi
+
+    ovh_zone_refresh "$zone" || true
+    if [ -n "$sub" ]; then
+        echo "OVH DNS: CNAME ${sub}.${zone} -> $target"
+    else
+        echo "OVH DNS: CNAME @.${zone} -> $target"
     fi
     return 0
 }
@@ -354,6 +403,9 @@ echo "RAM:      ${RAM_MB}MB (${RAM_SIZE}GB)"
 if [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ]; then
     for _t in "${OVH_DNS_TARGETS[@]}"; do
         echo "OVH DNS:  ${_t} -> $IP (A)"
+        if [ "${OVH_DNS_WWW_CNAME,,}" != "false" ] && [ "${OVH_DNS_WWW_CNAME,,}" != "0" ] && [ "${OVH_DNS_WWW_CNAME,,}" != "no" ]; then
+            echo "OVH DNS:  www.${_t} -> CNAME ${_t}."
+        fi
     done
 fi
 echo "--------------------------------"
@@ -412,7 +464,23 @@ if [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ] \
                 echo "WARNING: Odrzucono subdomenę '$_sd' (nieprawidłowa etykieta) dla '$_fqdn'." >&2
                 continue
             fi
-            ovh_dns_set_a "$_z" "$_sd" "$IP" || true
+            if ovh_dns_set_a "$_z" "$_sd" "$IP"; then
+                if [ "${OVH_DNS_WWW_CNAME,,}" != "false" ] && [ "${OVH_DNS_WWW_CNAME,,}" != "0" ] && [ "${OVH_DNS_WWW_CNAME,,}" != "no" ]; then
+                    _canon="${_fqdn%.}"
+                    _canon_lc=$(echo "$_canon" | tr '[:upper:]' '[:lower:]')
+                    if [ -n "$_sd" ]; then
+                        _www_sd="www.${_sd}"
+                    else
+                        _www_sd="www"
+                    fi
+                    if [[ ! "$_www_sd" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
+                        echo "WARNING: Pomijam CNAME www dla '$_fqdn' (nieprawidłowa etykieta '$_www_sd')." >&2
+                    else
+                        _cname_target="${_canon_lc}."
+                        ovh_dns_set_cname "$_z" "$_www_sd" "$_cname_target" || true
+                    fi
+                fi
+            fi
         done
     fi
 elif [ "$SKIP_OVH_DNS" = false ] && [ "${#OVH_DNS_TARGETS[@]}" -gt 0 ]; then

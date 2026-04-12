@@ -32,6 +32,9 @@ OVH_CONSUMER_KEY=""
 OVH_ENDPOINT="https://eu.api.ovh.com"
 OVH_DNS_TTL="3600"
 
+# Po każdym rekordzie A: www.<ten_sam_host> -> CNAME (np. www.server123.hostier.pl -> server123.hostier.pl). Wyłączenie: OVH_DNS_WWW_CNAME="false"
+# OVH_DNS_WWW_CNAME="true"
+
 # Pierwszy rekord A — ten sam host co nazwa VM: <VM_NAME_PREFIX><VMID>.<strefa>
 # Np. server1847392.hostier.pl
 OVH_DNS_AUTO_ZONE="hostier.pl"
