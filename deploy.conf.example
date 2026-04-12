@@ -20,7 +20,7 @@ GW="213.210.35.2"
 # --- 3. Obraz i konto w gościu ---
 USER="debian"
 SSHKEY="$HOME/yszty-h.pub"
-# Bez klucza SSH w cloud-init: SKIP_SSHKEY="true" lub ./deploy-vm.sh -K. Gdy ustawisz hasło gościa (VM_USER_PASSWORD / -W / -w), klucz i tak nie jest dodawany.
+# Bez klucza SSH w cloud-init: SKIP_SSHKEY="true" lub ./deploy-vm.sh -K. Gdy ustawisz hasło gościa (VM_USER_PASSWORD / -W / -w), klucz z tej zmiennej nie jest dodawany — chyba że podasz jawny plik: ./deploy-vm.sh -k /ścieżka/do/klucza.pub
 # SKIP_SSHKEY="false"
 IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 # Opcjonalne hasło dla USER w gościu (cloud-init); puste = logowanie kluczem SSH (SSHKEY).
