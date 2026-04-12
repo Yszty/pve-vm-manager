@@ -27,10 +27,15 @@ IMAGE="/mnt/temp_drive/import/debian-13-generic-amd64.qcow2"
 # Unikaj hasła w jednej linii poleceń (historia/ps). Lepiej: ./deploy-vm.sh -W (ciche pytanie)
 # albo hasło w tym pliku / deploy.local.conf, albo: ./deploy-vm.sh -w - < plik_z_haslem (chmod 600)
 # VM_USER_PASSWORD=""
-# Przy haśle: qm set --cicustom vendor=… (ssh_pwauth). Jeden wspólny plik na wszystkie VM (domyślnie deploy-vm-ssh-pwauth.yaml), bez nowego pliku na każdy VMID.
-# CLOUDINIT_SNIPPET_STORAGE="local"
-# CLOUDINIT_SNIPPETS_PATH="/var/lib/vz/snippets"
-# CLOUDINIT_VENDOR_SSH_PWAUTH_FILE="deploy-vm-ssh-pwauth.yaml"
+# Cloud-init vendor (qm --cicustom vendor=…): profil deployu → plik <profil>.yml w katalogu Snippets.
+# Tryb auto (puste CLOUDINIT_DEPLOY_PROFILE): no-ssh-key-deploy | password-and-ssh-deploy | ssh-key-only | standard
+# Nadpisanie: CLOUDINIT_DEPLOY_PROFILE lub ./deploy-vm.sh -P profil
+# CLOUDINIT_DEPLOY_PROFILE=""
+# CLOUDINIT_CUSTOM_SNIPPET_STORAGE="local"
+# CLOUDINIT_CUSTOM_SNIPPETS_PATH="/var/lib/vz/snippets"
+# Kilka ścieżek rozdziel „:” (pierwsza istniejąca). Aliasy starych nazw: CLOUDINIT_SNIPPET_STORAGE, CLOUDINIT_SNIPPETS_PATH
+# Opcjonalna stała nazwa pliku zamiast <profil>.yml: CLOUDINIT_VENDOR_FILE_OVERRIDE (legacy: CLOUDINIT_VENDOR_SSH_PWAUTH_FILE)
+# Treść YAML per profil: funkcja deploy_cloudinit_vendor_yaml_for_profile w deploy-vm.sh
 
 # Domyślne rozmiary (gdy nie podasz -d / -r)
 DISK_GB_DEFAULT="40"
