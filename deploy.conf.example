@@ -48,3 +48,19 @@ OVH_DNS_FQDN=""
 # Opcjonalnie: stałe VMID / IP (nadpisują -i / -p). Bez tego: losowy VMID 1###### (1 + 6 cyfr).
 # DEPLOY_VMID=""
 # DEPLOY_IP=""
+
+# --- Powiadomienie e-mail (SMTP po wdrożeniu; opcjonalne) ---
+# Bez MAIL_SMTP_HOST skrypt nie wysyła maili. Wymaga curl na hoście Proxmox.
+# MAIL_SMTP_HOST="smtp.example.com"
+# MAIL_SMTP_PORT="587"
+# MAIL_SMTP_USER=""
+# MAIL_SMTP_PASSWORD=""
+# MAIL_FROM="noreply@example.com"
+# MAIL_ADMIN="admin@example.com"
+# Opcjonalnie: temat z prefiksem (domyślnie [deploy-vm])
+# MAIL_SUBJECT_PREFIX="[deploy-vm]"
+# Port 465: implicit SSL (smtps). STARTTLS na 587 domyślnie włączony; wyłączenie lokalnego relay bez TLS:
+# MAIL_SMTP_STARTTLS="false"
+# Certyfikat niezaufany (np. self-signed):
+# MAIL_SMTP_INSECURE="true"
+# Dodatkowy odbiorca: ./deploy-vm.sh -e inny@example.com (poza MAIL_ADMIN)
