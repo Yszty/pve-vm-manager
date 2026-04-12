@@ -42,7 +42,9 @@ send_deploy_success_mail() {
     fi
     local body tmp _t _canon _www_fqdn
 
-    body="Wdrożenie zakończone pomyślnie.
+    body="Dzień dobry,
+dziękujemy, że wybrałeś nasze usługi.
+Informujemy, że Twój VPS został zainstalowany i jest gotowy do użycia!
 
 System:        ${GUEST_OS_LABEL:-?}
 Nazwa serwera: $VM_NAME
