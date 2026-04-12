@@ -54,6 +54,9 @@ MAIL_SMTP_USER="${MAIL_SMTP_USER:-}"
 MAIL_SMTP_PASSWORD="${MAIL_SMTP_PASSWORD:-}"
 MAIL_SMTP_STARTTLS="${MAIL_SMTP_STARTTLS:-true}"
 MAIL_SMTP_INSECURE="${MAIL_SMTP_INSECURE:-false}"
+# OVH / niektóre serwery: "login" → curl --login-options AUTH=LOGIN (często usuwa błąd 67 przy 587)
+MAIL_SMTP_AUTH="${MAIL_SMTP_AUTH:-}"
+MAIL_SMTP_DEBUG="${MAIL_SMTP_DEBUG:-false}"
 MAIL_FROM="${MAIL_FROM:-}"
 MAIL_ADMIN="${MAIL_ADMIN:-}"
 MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[deploy-vm]}"
@@ -302,10 +305,11 @@ deploy_send_success_mail() {
     local smtp_host="${MAIL_SMTP_HOST:-}"
     [ -z "$smtp_host" ] && return 0
 
-    local from_a="${MAIL_FROM:-}"
+    # Nadawca: jawny MAIL_FROM albo to samo co konto SMTP (OVH wymaga zgodności z loginem)
+    local from_a="${MAIL_FROM:-${MAIL_SMTP_USER:-}}"
     local admin_a="${MAIL_ADMIN:-}"
     if [ -z "$from_a" ] || [ -z "$admin_a" ]; then
-        echo "WARNING: MAIL_SMTP_HOST jest ustawiony, ale brakuje MAIL_FROM lub MAIL_ADMIN — pomijam e-mail." >&2
+        echo "WARNING: MAIL_SMTP_HOST jest ustawiony, ale brakuje MAIL_FROM (lub MAIL_SMTP_USER) albo MAIL_ADMIN — pomijam e-mail." >&2
         return 0
     fi
     if ! command -v curl >/dev/null 2>&1; then
@@ -359,18 +363,27 @@ DNS (A):"
         printf '%s\n' "$body"
     } > "$tmp"
 
-    local -a curl_args=(-sS)
+    local -a curl_args=()
+    if [ "${MAIL_SMTP_DEBUG,,}" = "true" ] || [ "${MAIL_SMTP_DEBUG,,}" = "1" ] || [ "${MAIL_SMTP_DEBUG,,}" = "yes" ]; then
+        curl_args+=(-v)
+    else
+        curl_args+=(-sS)
+    fi
     if [ "${MAIL_SMTP_INSECURE,,}" = "true" ] || [ "${MAIL_SMTP_INSECURE,,}" = "1" ] || [ "${MAIL_SMTP_INSECURE,,}" = "yes" ]; then
         curl_args+=(-k)
     fi
+    case "${MAIL_SMTP_AUTH,,}" in
+        login) curl_args+=(--login-options AUTH=LOGIN) ;;
+        plain) curl_args+=(--login-options AUTH=PLAIN) ;;
+    esac
     if [ -n "${MAIL_SMTP_USER:-}" ]; then
         curl_args+=(-u "${MAIL_SMTP_USER}:${MAIL_SMTP_PASSWORD}")
     fi
 
     local smtp_url
+    # 465 = SMTP przez SSL (smtps); bez dodatkowego --ssl-reqd — przy OVH 587+STARTTLS często trzeba MAIL_SMTP_AUTH=login lub przejść na 465
     if [ "$port" = "465" ]; then
         smtp_url="smtps://${smtp_host}:465"
-        curl_args+=(--ssl-reqd)
     elif [ "${MAIL_SMTP_STARTTLS,,}" != "false" ] && [ "${MAIL_SMTP_STARTTLS,,}" != "0" ] && [ "${MAIL_SMTP_STARTTLS,,}" != "no" ]; then
         smtp_url="smtp://${smtp_host}:${port}"
         curl_args+=(--ssl-reqd)

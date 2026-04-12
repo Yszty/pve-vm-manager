@@ -60,12 +60,20 @@ OVH_DNS_FQDN=""
 # MAIL_SMTP_PORT="587"
 # MAIL_SMTP_USER=""
 # MAIL_SMTP_PASSWORD=""
+# Nadawca: ustaw MAIL_FROM lub zostaw puste — użyte zostanie MAIL_SMTP_USER (ważne przy OVH: zgodność z kontem).
 # MAIL_FROM="noreply@example.com"
 # MAIL_ADMIN="admin@example.com"
 # Opcjonalnie: temat z prefiksem (domyślnie [deploy-vm])
 # MAIL_SUBJECT_PREFIX="[deploy-vm]"
-# Port 465: implicit SSL (smtps). STARTTLS na 587 domyślnie włączony; wyłączenie lokalnego relay bez TLS:
+# Port 465 = smtps (SSL). Przy OVH (ssl0.ovh.net) zwykle 465 albo 587 + poniżej:
+# MAIL_SMTP_PORT="465"
+# Jeśli curl zwraca (67) Login denied na 587, ustaw MAIL_SMTP_AUTH="login" albo przejdź na port 465.
+# MAIL_SMTP_AUTH="login"
+# Diagnostyka (log SMTP na stderr): MAIL_SMTP_DEBUG="true"
+# MAIL_SMTP_DEBUG="false"
+# STARTTLS na 587 domyślnie włączony; wyłączenie lokalnego relay bez TLS:
 # MAIL_SMTP_STARTTLS="false"
 # Certyfikat niezaufany (np. self-signed):
 # MAIL_SMTP_INSECURE="true"
+# Hasło z ":" w środku psuje -u w curl — zmień hasło albo użyj innej metody wysyłki.
 # Dodatkowy odbiorca: ./deploy-vm.sh -e inny@example.com (poza MAIL_ADMIN)
